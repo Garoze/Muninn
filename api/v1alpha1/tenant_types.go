@@ -1,6 +1,6 @@
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/api/meta/v1"
+import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // TenantPhase represent the lifecycle phase of a Tenant resource.
 // +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Suspended;Deleting
