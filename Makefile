@@ -4,8 +4,11 @@ BIN_DIR     := bin
 CRD_DIR     := config/crd
 SAMPLES_DIR := config/samples
 PROTO_DIR   := proto
+PROTO_SRC   := $(PROTO_DIR)/v1
+GEN_DIR     := gen
 
 CONTROLLER_GEN ?= controller-gen
+PROTOC         ?= protoc
 IMG            ?= muninn:latest
 KUBECONFIG     ?= $(HOME)/.kube/config
 
@@ -22,13 +25,14 @@ QUERY_BIN   ?= muninnctl
 generate:
 	$(CONTROLLER_GEN) object:headerFile="" paths="./api/..."
 
-# regenerate code from .proto definitions
+# regenerate Go code (message types + gRPC stubs) from proto/v1/*.proto
+# requires: protoc, protoc-gen-go, protoc-gen-go-grpc on $PATH
 proto:
-	@if [ -d $(PROTO_DIR) ]; then \
-		buf generate; \
-	else \
-		echo "no $(PROTO_DIR)/ yet, nothing to generate"; \
-	fi
+	$(PROTOC) \
+		--proto_path=$(PROTO_SRC) \
+		--go_out=. --go_opt=module=$(MODULE) \
+		--go-grpc_out=. --go-grpc_opt=module=$(MODULE) \
+		$(PROTO_SRC)/discovery.proto
 
 fmt:
 	gofmt -l -w .
