@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package discovery.v1;
+
+option go_package = "github.com/garoze/muninn/gen/discovery/v1;discoveryv1";
+
+import "google/protobuf/struct.proto";
+
+// DiscoveryService provides tenant-scoped runtime configuration lookup.
+//
+// Watches Tenant, TenantConfig, and Policy CRDs via controller-runtime
+// informers, maintains a patch-based in-memory cache keyed by tenant ID,
+// and serves only whitelisted configuration keys.
+service DiscoveryService {
+  // Query returns configuration values for specified tenant and keys.
+  rpc Query(QueryRequest) returns (QueryResponse);
+
+  // Describe list all supported configuration keys and their value types.
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+}
+
+message QueryRequest {
+  string tenant_id = 1; // REQUIRED. Tenant identifier.
+  repeated string keys =
+      2;           // REQUIRED. Keys to fetch (dot-separated, whitelisted).
+  bool strict = 3; // If true, any missing key returns InvalidArgument.
+}
+
+message QueryResponse {
+  repeated KeyValue values = 1;
+  repeated string missing_keys =
+      2;               // Populated when strict=false and keys are absent.
+  string revision = 3; // Cache revision token, useful for debugging.
+}
+
+message KeyValue {
+  string key = 1;
+  google.protobuf.Value value = 2;
+  string source = 3; // Which CRD field this value was resolved from.
+}
+
+message DescribeRequest {}
+
+message DescribeResponse { repeated SupportedKey supported_keys = 1; }
+
+message SupportedKey {
+  string key = 1;
+  string type_hint = 2; // "string", "array", "object"
+  string description = 3;
+}
