@@ -87,9 +87,9 @@ type Tenant struct {
 
 // TenantList contains a list of Tenant.
 type TenantList struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Items             []Tenant `json:"items"`
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Tenant `json:"items"`
 }
 
 func init() {

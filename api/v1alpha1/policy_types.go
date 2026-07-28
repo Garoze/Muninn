@@ -81,9 +81,9 @@ type Policy struct {
 
 // PolicyList contains a list of Policy.
 type PolicyList struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Items             []Policy `json:"items"`
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Policy `json:"items"`
 }
 
 func init() {
