@@ -95,7 +95,7 @@ func (in *Policy) DeepCopyObject() runtime.Object {
 func (in *PolicyList) DeepCopyInto(out *PolicyList) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
-	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
 		*out = make([]Policy, len(*in))
@@ -253,7 +253,7 @@ func (in *TenantConfig) DeepCopyObject() runtime.Object {
 func (in *TenantConfigList) DeepCopyInto(out *TenantConfigList) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
-	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
 		*out = make([]TenantConfig, len(*in))
@@ -329,7 +329,7 @@ func (in *TenantConfigStatus) DeepCopy() *TenantConfigStatus {
 func (in *TenantList) DeepCopyInto(out *TenantList) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
-	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
+	in.ListMeta.DeepCopyInto(&out.ListMeta)
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
 		*out = make([]Tenant, len(*in))
