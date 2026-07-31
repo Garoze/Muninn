@@ -20,13 +20,13 @@ type GRPCServerResult struct {
 
 // NewGRPCListener binds a TCP listener on cfg.GrpcServiceAddr.
 func NewGRPCListener(cfg *config.Config, log *zap.Logger) (net.Listener, error) {
-	lis, err := net.Listen("tcp", cfg.GrpcProbeAddr)
+	lis, err := net.Listen("tcp", cfg.GrpcServiceAddr)
 	if err != nil {
 		return nil, err
 	}
 
 	log.Info("gRPC listener bound",
-		zap.String("addr", cfg.GrpcProbeAddr),
+		zap.String("addr", cfg.GrpcServiceAddr),
 	)
 
 	return lis, nil
