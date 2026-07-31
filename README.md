@@ -29,21 +29,21 @@ whitelisting (unknown keys are rejected, not silently ignored).
 
 Three CRDs, all under group `muninn.io`, namespace `tenant-<id>`:
 
-| CRD | Scope | Purpose |
-|---|---|---|
-| `Tenant` | Cluster | Identity, lifecycle phase, provisioned cloud resource refs (`status.cloudResources`) |
-| `TenantConfig` | Namespaced | Arbitrary `map[string]string` runtime config |
-| `Policy` | Namespaced | JWT validation settings, subject/role → permission bindings |
+| CRD            | Scope      | Purpose                                                                              |
+|----------------|------------|--------------------------------------------------------------------------------------|
+| `Tenant`       | Cluster    | Identity, lifecycle phase, provisioned cloud resource refs (`status.cloudResources`) |
+| `TenantConfig` | Namespaced | Arbitrary `map[string]string` runtime config                                         |
+| `Policy`       | Namespaced | JWT validation settings, subject/role → permission bindings                          |
 
-| Package | Role |
-|---|---|
-| `internal/kube` | controller-runtime informers, patch-based cache sync |
-| `internal/app` | domain layer: `Cache`, `DiscoveryService.Query`, sentinel errors |
-| `internal/transport/grpc` | proto ↔ domain translation, gRPC handler |
-| `internal/observability` | Prometheus metrics, health checks, gRPC server/listener |
-| `internal/config` | env-driven configuration |
-| `api/v1alpha1` | CRD Go types + generated deepcopy |
-| `gen/discovery/v1` | generated gRPC/protobuf stubs |
+| Package                   | Role                                                             |
+|---------------------------|------------------------------------------------------------------|
+| `internal/kube`           | controller-runtime informers, patch-based cache sync             |
+| `internal/app`            | domain layer: `Cache`, `DiscoveryService.Query`, sentinel errors |
+| `internal/transport/grpc` | proto ↔ domain translation, gRPC handler                         |
+| `internal/observability`  | Prometheus metrics, health checks, gRPC server/listener          |
+| `internal/config`         | env-driven configuration                                         |
+| `api/v1alpha1`            | CRD Go types + generated deepcopy                                |
+| `gen/discovery/v1`        | generated gRPC/protobuf stubs                                    |
 
 `internal/app` has zero imports of `grpc`, `k8s.io/*`, or any generated
 proto type — the domain layer only ever sees Go primitives and its own
@@ -105,8 +105,8 @@ them.
 ### Apply the sample fixtures
 
 ```bash
-make sample          # Namespace + Tenant + TenantConfig + Policy
-make sample-status   # patches Tenant.status.cloudResources (a separate
+make sample           # Namespace + Tenant + TenantConfig + Policy
+make sample-status    # patches Tenant.status.cloudResources (a separate
                       # subresource — `kubectl apply` on spec alone can't
                       # touch it)
 ```
@@ -118,7 +118,7 @@ immediately.
 ### Run it
 
 ```bash
-export KUBE_CONFIG_PATH=~/.kube/config   # Muninn's own config var; separate
+export KUBE_CONFIG_PATH=~/.kube/config    # Muninn's own config var; separate
                                           # from kubectl's $KUBECONFIG
 make run
 ```
@@ -154,11 +154,11 @@ call for `TENANT.runtime`.
 ## Testing
 
 ```bash
-make test-unit          # go test ./... -short — no cluster required
-make test-integration    # go test ./... -tags=integration -run Integration
+make test-unit            # go test ./... -short — no cluster required
+make test-integration     # go test ./... -tags=integration -run Integration
                           # requires KUBECONFIG; currently no tests are
                           # tagged `integration` yet (see Roadmap)
-make test                # both
+make test                 # both
 ```
 
 Unit coverage spans the domain layer (`internal/app`), the gRPC↔domain
@@ -171,16 +171,16 @@ guarantee described above.
 
 ## Makefile reference
 
-| Target | Does |
-|---|---|
-| `make generate` | Regenerate deepcopy code from kubebuilder markers |
-| `make install-crds` | Generate + apply CRD manifests to `$KUBECONFIG` |
-| `make sample` / `make sample-status` | Apply sample fixtures / patch sample status |
-| `make run` | Run the server locally against `$KUBECONFIG` |
-| `make test` / `test-unit` / `test-integration` | Run tests |
-| `make fmt` / `vet` / `lint` / `tidy` | Standard Go hygiene |
-| `make proto` | Regenerate gRPC stubs from `proto/v1/discovery.proto` (requires `protoc`) |
-| `make build` | Compile `cmd/` entrypoints into `bin/` |
+| Target                                         | Does                                                                      |
+|------------------------------------------------|---------------------------------------------------------------------------|
+| `make generate`                                | Regenerate deepcopy code from kubebuilder markers                         |
+| `make install-crds`                            | Generate + apply CRD manifests to `$KUBECONFIG`                           |
+| `make sample` / `make sample-status`           | Apply sample fixtures / patch sample status                               |
+| `make run`                                     | Run the server locally against `$KUBECONFIG`                              |
+| `make test` / `test-unit` / `test-integration` | Run tests                                                                 |
+| `make fmt` / `vet` / `lint` / `tidy`           | Standard Go hygiene                                                       |
+| `make proto`                                   | Regenerate gRPC stubs from `proto/v1/discovery.proto` (requires `protoc`) |
+| `make build`                                   | Compile `cmd/` entrypoints into `bin/`                                    |
 
 ## Status
 
