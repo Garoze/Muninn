@@ -23,7 +23,7 @@ type Config struct {
 
 	// TraceSampleRatio is the probability (0.0-1.0) that the new root span is sampled.
 	// Uses ParentBased wrapping so inbound sampled traces are alwys honored.
-	TraceSampleRation float64
+	TraceSampleRatio float64
 
 	// KubeConfigPath is an optional path to a kubeconfig file.
 	// When empty, in-cluster config is used.
@@ -45,7 +45,7 @@ func New() *Config {
 		GrpcProbeAddr:        envOrDefault("GRPC_PROBE_ADDR", ":5011"),
 		MetricsAddr:          envOrDefault("METRICS_ADDR", ":9090"),
 		OTELExporterEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4371"),
-		TraceSampleRation:    envFloat64("OTEL_TRACES_SAMPLE_ARG", 0.1),
+		TraceSampleRatio:     envFloat64("OTEL_TRACES_SAMPLE_ARG", 0.1),
 		KubeConfigPath:       os.Getenv("KUBE_CONFIG_PATH"),
 		CacheEntryTTL:        envDuration("CACHE_ENTRY_TTL", 0),
 		StartupTimeout:       envDuration("STARTUP_TIMEOUT", 2*time.Minute),
