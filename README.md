@@ -4,7 +4,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/logo-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset=".github/images/logo.svg">
-    <img alt="Muninn logo" src=".github/images/logo.svg" width="400">
+    <img alt="Muninn logo" src=".github/images/logo.svg" width="840">
   </picture>
 </p>
 
