@@ -108,7 +108,7 @@ func (w *Watcher) Start(ctx context.Context) error {
 		return err
 	}
 
-	if err := w.registerInformerHandlers(w.ctx, &v1alpha1.Policy{}, "TenantConfig", w.onTenantConfigUpsert, w.onTenantConfigDelete); err != nil {
+	if err := w.registerInformerHandlers(w.ctx, &v1alpha1.TenantConfig{}, "TenantConfig", w.onTenantConfigUpsert, w.onTenantConfigDelete); err != nil {
 		w.cancel()
 		return err
 	}
