@@ -8,7 +8,7 @@ type TenantConfigSpec struct {
 	// services at runtime via Muninn Query API (TENANT.runtime key),
 	// Values are strings; consumers interpret types themselves.
 	// +optional
-	RuntimeConfig map[string]string `json:"runtimeconfig,omitempty"`
+	RuntimeConfig map[string]string `json:"runtimeConfig,omitempty"`
 }
 
 // TenantConfigStatus defines the observed state of TenantConfig.
@@ -21,7 +21,7 @@ type TenantConfigStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,shortName=tc
-// +kubebuilder:printcoumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // TenantConfig holds runtime configuration for a single tenant.
 // It is namespace-scoped and lives in the tenantś dedicted namespace.

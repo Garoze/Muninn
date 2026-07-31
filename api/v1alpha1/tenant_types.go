@@ -58,11 +58,11 @@ type TenantStatus struct {
 
 	// CloudResources tracks external resources provisioned for this tenant.
 	// +optional
-	CloudResources CloudResources `json:"cloudResouces,omitempty"`
+	CloudResources CloudResources `json:"cloudResources,omitempty"`
 
 	// Conditions represent the latest overvations of the resource state.
 	// +optional
-	Coditions []metav1.Condition `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
