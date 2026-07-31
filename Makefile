@@ -100,7 +100,7 @@ sample-status:
 
 # run the server locally against the cluster in $KUBECONFIG
 run:
-	KUBECONFIG=$(KUBECONFIG) go run ./$(CMD_DIR)/$(MANAGER_BIN)
+	KUBE_CONFIG_PATH=$(KUBECONFIG) go run ./$(CMD_DIR)/$(MANAGER_BIN)
 
 # query the Muninn Query API, e.g.:
 #   make query TENANT=tenant-abc KEYS=TENANT.id,TENANT.runtime
