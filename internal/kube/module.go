@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/go-logr/zapr"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/garoze/muninn/internal/config"
 )
@@ -16,8 +18,16 @@ var Module = fx.Options(
 	fx.Provide(newRestConfig),
 	fx.Provide(NewScheme),
 	fx.Provide(NewWatcher),
+	fx.Invoke(initControllerRuntimeLogger),
 	fx.Invoke(startWatcher),
 )
+
+// initControllerRuntimeLogger bridges the zap logger into controller-runtime's
+// logr interface. Must run before any controller-runtime component (cache,
+// informers) starts, otherwise it falls back to a no-op logger and warns.
+func initControllerRuntimeLogger(log *zap.Logger) {
+	crlog.SetLogger(zapr.NewLogger(log.Named("controller-runtime")))
+}
 
 func newRestConfig(cfg *config.Config) (*rest.Config, error) {
 	if cfg.KubeConfigPath != "" {

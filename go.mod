@@ -3,6 +3,7 @@ module github.com/garoze/muninn
 go 1.26.5
 
 require (
+	github.com/go-logr/zapr v1.3.0
 	github.com/prometheus/client_golang v1.23.2
 	go.uber.org/fx v1.24.0
 	go.uber.org/zap v1.27.1
