@@ -1,0 +1,7 @@
+apiVersion: muninn.io/v1alpha1
+kind: Tenant
+metadata:
+  name: arasaka
+spec:
+  tenantID: arasaka
+  displayName: Arasaka Corporation

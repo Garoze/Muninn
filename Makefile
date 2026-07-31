@@ -86,9 +86,17 @@ install-crds:
 	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:dir=$(CRD_DIR)
 	kubectl apply -f $(CRD_DIR)
 
-# apply a sample Tenant resource to the cluster
+# apply the sample Namespace, Tenant, TenantConfig, and Policy to the cluster
 sample:
+	kubectl apply -f $(SAMPLES_DIR)/namespace.yaml
 	kubectl apply -f $(SAMPLES_DIR)/tenant.yaml
+	kubectl apply -f $(SAMPLES_DIR)/tenantconfig.yaml
+	kubectl apply -f $(SAMPLES_DIR)/policy.yaml
+
+# patch the sample Tenant's status with placeholder CloudResources data
+sample-status:
+	kubectl patch tenant arasaka --type=merge --subresource=status \
+		--patch-file=$(SAMPLES_DIR)/tenant-status-patch.yaml
 
 # run the server locally against the cluster in $KUBECONFIG
 run:
