@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/garoze/muninn/internal/config"
 	"go.uber.org/zap"
 )
 
@@ -139,17 +140,18 @@ type QueryResult struct {
 // DiscoveryService implements the core query logic.
 type DiscoveryService struct {
 	Cache         *Cache
-	Logger        *zap.Logger
-	CacheEntryTTL time.Duration
+	logger        *zap.Logger
+	cacheEntryTTL time.Duration
 	now           func() time.Time
 }
 
 // NewDiscoveryService contructs a DiscoveryService with an empty cache.
-func NewDiscoveryService(logger *zap.Logger) *DiscoveryService {
+func NewDiscoveryService(cfg *config.Config, logger *zap.Logger) *DiscoveryService {
 	return &DiscoveryService{
-		Cache:  NewCache(),
-		Logger: logger,
-		now:    time.Now,
+		Cache:         NewCache(),
+		logger:        logger,
+		cacheEntryTTL: cfg.CacheEntryTTL,
+		now:           time.Now,
 	}
 }
 
@@ -184,8 +186,8 @@ func (s *DiscoveryService) Query(ctx context.Context, tenantID string, keys []st
 		return nil, nil, "", fmt.Errorf("%w: %s", ErrTenantNotFound, tenantID)
 	}
 
-	if s.CacheEntryTTL > 0 && !state.UpdatedAt.IsZero() {
-		if s.now().Sub(state.UpdatedAt) > s.CacheEntryTTL {
+	if s.cacheEntryTTL > 0 && !state.UpdatedAt.IsZero() {
+		if s.now().Sub(state.UpdatedAt) > s.cacheEntryTTL {
 			return nil, nil, "", fmt.Errorf("%w: %s", ErrCacheEntryStale, tenantID)
 		}
 	}
@@ -310,7 +312,7 @@ func (s *DiscoveryService) Query(ctx context.Context, tenantID string, keys []st
 		return nil, nil, "", fmt.Errorf("%w: %s", ErrStrictMissingKeys, missing)
 	}
 
-	s.Logger.Debug("query completed",
+	s.logger.Debug("query completed",
 		zap.String("tenant_id", tenantID),
 		zap.Int("keys_requested", len(keys)),
 		zap.Int("keys_resolved", len(results)),
