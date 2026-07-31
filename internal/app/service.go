@@ -140,16 +140,16 @@ type QueryResult struct {
 // DiscoveryService implements the core query logic.
 type DiscoveryService struct {
 	Cache         *Cache
-	logger        *zap.Logger
+	log           *zap.Logger
 	cacheEntryTTL time.Duration
 	now           func() time.Time
 }
 
 // NewDiscoveryService contructs a DiscoveryService with an empty cache.
-func NewDiscoveryService(cfg *config.Config, logger *zap.Logger) *DiscoveryService {
+func NewDiscoveryService(cfg *config.Config, log *zap.Logger) *DiscoveryService {
 	return &DiscoveryService{
 		Cache:         NewCache(),
-		logger:        logger,
+		log:           log,
 		cacheEntryTTL: cfg.CacheEntryTTL,
 		now:           time.Now,
 	}
@@ -312,7 +312,7 @@ func (s *DiscoveryService) Query(ctx context.Context, tenantID string, keys []st
 		return nil, nil, "", fmt.Errorf("%w: %s", ErrStrictMissingKeys, missing)
 	}
 
-	s.logger.Debug("query completed",
+	s.log.Debug("query completed",
 		zap.String("tenant_id", tenantID),
 		zap.Int("keys_requested", len(keys)),
 		zap.Int("keys_resolved", len(results)),
