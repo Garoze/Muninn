@@ -376,8 +376,8 @@ func (in *TenantSpec) DeepCopy() *TenantSpec {
 func (in *TenantStatus) DeepCopyInto(out *TenantStatus) {
 	*out = *in
 	out.CloudResources = in.CloudResources
-	if in.Coditions != nil {
-		in, out := &in.Coditions, &out.Coditions
+	if in.Conditions != nil {
+		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
