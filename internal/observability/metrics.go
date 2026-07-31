@@ -30,7 +30,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Namespace: "discovery",
 			Name:      "queries_total",
 			Help:      "Total discovery query outcoms.",
-		}, []string{"event"}),
+		}, []string{"result", "code"}),
 
 		InformerEventsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "discovery",
