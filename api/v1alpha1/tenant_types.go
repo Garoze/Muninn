@@ -67,7 +67,7 @@ type TenantStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortname=tn
+// +kubebuilder:resource:scope=Cluster,shortName=tn
 // +kubebuilder:printcolumn:name="Tenant ID",type=string,JSONPath=`.spec.tenantID`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Namespace",type=string,JSONPath=`.status.namespace`
