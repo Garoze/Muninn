@@ -566,6 +566,11 @@ func extractTenantConfig(obj any) *v1alpha1.TenantConfig {
 		return tc
 	}
 
+	inner := unwrapTombstone(obj)
+	if tc, ok := inner.(*v1alpha1.TenantConfig); ok {
+		return tc
+	}
+
 	return nil
 }
 
