@@ -8,13 +8,12 @@ ask Muninn "give me these keys for this tenant" instead of reading
 Kubernetes objects directly — Muninn is the only thing that needs to know
 what a `Tenant`, `TenantConfig`, or `Policy` object looks like.
 
+```mermaid
+flowchart LR
+    K[Kubernetes API] --> I[controller-runtime informers]
+    I --> C[(In-memory cache)]
+    C --> G[gRPC Query API]
 ```
-Kubernetes API → controller-runtime informers → in-memory cache
-                                                       ↓
-                                                gRPC Query API
-```
-
----
 
 ## Why this exists
 
@@ -36,15 +35,15 @@ Three CRDs, all under group `muninn.io`, namespace `tenant-<id>`:
 | `TenantConfig` | Namespaced | Arbitrary `map[string]string` runtime config |
 | `Policy` | Namespaced | JWT validation settings, subject/role → permission bindings |
 
-```
-internal/kube          →  controller-runtime informers, patch-based cache sync
-internal/app            →  domain layer: Cache, DiscoveryService.Query, sentinel errors
-internal/transport/grpc →  proto ↔ domain translation, gRPC handler
-internal/observability  →  Prometheus metrics, health checks, gRPC server/listener
-internal/config          →  env-driven configuration
-api/v1alpha1              →  CRD Go types + generated deepcopy
-gen/discovery/v1           →  generated gRPC/protobuf stubs
-```
+| Package | Role |
+|---|---|
+| `internal/kube` | controller-runtime informers, patch-based cache sync |
+| `internal/app` | domain layer: `Cache`, `DiscoveryService.Query`, sentinel errors |
+| `internal/transport/grpc` | proto ↔ domain translation, gRPC handler |
+| `internal/observability` | Prometheus metrics, health checks, gRPC server/listener |
+| `internal/config` | env-driven configuration |
+| `api/v1alpha1` | CRD Go types + generated deepcopy |
+| `gen/discovery/v1` | generated gRPC/protobuf stubs |
 
 `internal/app` has zero imports of `grpc`, `k8s.io/*`, or any generated
 proto type — the domain layer only ever sees Go primitives and its own
