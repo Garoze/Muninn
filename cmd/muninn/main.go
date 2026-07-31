@@ -28,12 +28,9 @@ func startFx() (*fx.App, error) {
 		kubeModule.Module,
 		grpcTransport.Module,
 
-		// Built here, not inside observability.Module, to avoid an import
-		// cycle between observability and transport/grpc: the gRPC server
-		// needs interceptors that would live in transport/grpc, and both
-		// kube.Watcher (health) and transport/grpc (registration) need the
-		// resulting *grpc.Server/*health.Server as independently injectable
-		// types rather than the bundled GRPCServerResult.
+		// gRPC server - constructed here (composition root) to avoid an
+		// import cycle between observability (listener/health) and
+		// transport/grpc (handler registration)
 		fx.Provide(func(log *zap.Logger) (*grpc.Server, *health.Server) {
 			r := observability.NewGRPCServer(log)
 			return r.Server, r.HealthServer
