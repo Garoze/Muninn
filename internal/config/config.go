@@ -42,11 +42,11 @@ type Config struct {
 func New() *Config {
 	return &Config{
 		GrpcServiceAddr:      envOrDefault("GRPC_SERVICE_ADDR", ":5010"),
-		GrpcProbeAddr:        envOrDefault("GRPC_PROBE_ADDR", "5011"),
+		GrpcProbeAddr:        envOrDefault("GRPC_PROBE_ADDR", ":5011"),
 		MetricsAddr:          envOrDefault("METRICS_ADDR", ":9090"),
 		OTELExporterEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4371"),
 		TraceSampleRation:    envFloat64("OTEL_TRACES_SAMPLE_ARG", 0.1),
-		KubeConfigPath:       os.Getenv("KUBEC_CONFIG_PATH"),
+		KubeConfigPath:       os.Getenv("KUBE_CONFIG_PATH"),
 		CacheEntryTTL:        envDuration("CACHE_ENTRY_TTL", 0),
 		StartupTimeout:       envDuration("STARTUP_TIMEOUT", 2*time.Minute),
 	}
