@@ -16,7 +16,11 @@ spec:
     singular: tenantconfig
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: |-
@@ -43,7 +47,7 @@ spec:
           spec:
             description: TenantConfigSpec defines the desired state of TenantConfig.
             properties:
-              runtimeconfig:
+              runtimeConfig:
                 additionalProperties:
                   type: string
                 description: |-

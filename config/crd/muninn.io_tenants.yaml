@@ -68,7 +68,7 @@ spec:
           status:
             description: TenantStatus defines the observed state of Tenant.
             properties:
-              cloudResouces:
+              cloudResources:
                 description: CloudResources tracks external resources provisioned
                   for this tenant.
                 properties:
