@@ -1,5 +1,13 @@
 # Muninn
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset=".github/images/logo.svg">
+    <img alt="Muninn logo" src=".github/images/logo.svg" width="400">
+  </picture>
+</p>
+
 **Kubernetes-native, multi-tenant runtime configuration discovery service.**
 
 Muninn watches Kubernetes CRDs, projects them into an in-memory cache keyed
