@@ -171,7 +171,7 @@ call for `TENANT.runtime`.
 make test-unit            # go test ./... -short — no cluster required
 make test-integration     # go test ./... -tags=integration -run Integration
                           # requires KUBECONFIG; currently no tests are
-                          # tagged `integration` yet (see Roadmap)
+                          # tagged `integration` yet (see Status)
 make test                 # both
 ```
 
