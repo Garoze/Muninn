@@ -43,5 +43,5 @@ type TenantConfigList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&TenantConfig{}, &TenantConfigList{})
+	addKnownTypes(&TenantConfig{}, &TenantConfigList{})
 }
