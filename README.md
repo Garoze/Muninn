@@ -8,9 +8,11 @@
   </picture>
 </p>
 
-[![ci](https://github.com/Garoze/Muninn/actions/workflows/ci.yml/badge.svg)](https://github.com/Garoze/Muninn/actions/workflows/ci.yml)
-[![license](https://img.shields.io/github/license/Garoze/Muninn)](./LICENSE)
-[![go version](https://img.shields.io/github/go-mod/go-version/Garoze/Muninn)](./go.mod)
+<p align="center">
+  <a href="https://github.com/Garoze/Muninn/actions/workflows/ci.yml"><img alt="ci" src="https://github.com/Garoze/Muninn/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="./LICENSE"><img alt="license" src="https://img.shields.io/github/license/Garoze/Muninn"></a>
+  <a href="./go.mod"><img alt="go version" src="https://img.shields.io/github/go-mod/go-version/Garoze/Muninn"></a>
+</p>
 
 **Kubernetes-native, multi-tenant runtime configuration discovery service.**
 
