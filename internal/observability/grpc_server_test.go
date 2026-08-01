@@ -14,7 +14,7 @@ func TestNewGRPCListener_BindsConfiguredAddr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer lis.Close()
+	defer func() { _ = lis.Close() }()
 
 	if lis.Addr().Network() != "tcp" {
 		t.Errorf("network: got %q, want tcp", lis.Addr().Network())
@@ -35,7 +35,7 @@ func TestNewGRPCListener_PortAlreadyInUseReturnsError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error binding first listener: %v", err)
 	}
-	defer first.Close()
+	defer func() { _ = first.Close() }()
 
 	second := &config.Config{GrpcServiceAddr: first.Addr().String()}
 	if _, err := NewGRPCListener(second, zap.NewNop()); err == nil {
