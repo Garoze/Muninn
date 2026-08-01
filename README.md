@@ -8,6 +8,10 @@
   </picture>
 </p>
 
+[![ci](https://github.com/Garoze/Muninn/actions/workflows/ci.yml/badge.svg)](https://github.com/Garoze/Muninn/actions/workflows/ci.yml)
+[![license](https://img.shields.io/github/license/Garoze/Muninn)](./LICENSE)
+[![go version](https://img.shields.io/github/go-mod/go-version/Garoze/Muninn)](./go.mod)
+
 **Kubernetes-native, multi-tenant runtime configuration discovery service.**
 
 Muninn watches Kubernetes CRDs, projects them into an in-memory cache keyed
