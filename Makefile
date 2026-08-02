@@ -7,10 +7,11 @@ PROTO_DIR   := proto
 PROTO_SRC   := $(PROTO_DIR)/v1
 GEN_DIR     := gen
 
-CONTROLLER_GEN ?= controller-gen
-PROTOC         ?= protoc
-IMG            ?= muninn:latest
-KUBECONFIG     ?= $(HOME)/.kube/config
+CONTROLLER_GEN  ?= controller-gen
+PROTOC          ?= protoc
+IMG             ?= muninn:latest
+KUBECONFIG      ?= $(HOME)/.kube/config
+CONTAINER_ENGINE ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 
 TENANT ?=
 KEYS   ?=
@@ -74,12 +75,13 @@ test-unit:
 test-integration:
 	go test ./... -tags=integration -run Integration
 
+# override the detected engine with: make image CONTAINER_ENGINE=docker
 image:
-	docker build -t $(IMG) .
+	$(CONTAINER_ENGINE) build -t $(IMG) .
 
 # import the built image into the local k3s node's containerd store
 load:
-	docker save $(IMG) | sudo k3s ctr images import -
+	$(CONTAINER_ENGINE) save $(IMG) | sudo k3s ctr images import -
 
 # generate CRD manifests and apply them to the cluster in $KUBECONFIG
 install-crds:
