@@ -44,7 +44,7 @@ func New() *Config {
 		GrpcServiceAddr:      envOrDefault("GRPC_SERVICE_ADDR", ":5010"),
 		GrpcProbeAddr:        envOrDefault("GRPC_PROBE_ADDR", ":5011"),
 		MetricsAddr:          envOrDefault("METRICS_ADDR", ":9090"),
-		OTELExporterEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4371"),
+		OTELExporterEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
 		TraceSampleRatio:     envFloat64("OTEL_TRACES_SAMPLE_ARG", 0.1),
 		KubeConfigPath:       os.Getenv("KUBE_CONFIG_PATH"),
 		CacheEntryTTL:        envDuration("CACHE_ENTRY_TTL", 0),

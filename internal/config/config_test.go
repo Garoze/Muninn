@@ -15,7 +15,7 @@ func TestNew_Defaults(t *testing.T) {
 		"GrpcServiceAddr":      {cfg.GrpcServiceAddr, ":5010"},
 		"GrpcProbeAddr":        {cfg.GrpcProbeAddr, ":5011"},
 		"MetricsAddr":          {cfg.MetricsAddr, ":9090"},
-		"OTELExporterEndpoint": {cfg.OTELExporterEndpoint, "localhost:4371"},
+		"OTELExporterEndpoint": {cfg.OTELExporterEndpoint, "localhost:4317"},
 		"TraceSampleRatio":     {cfg.TraceSampleRatio, 0.1},
 		"KubeConfigPath":       {cfg.KubeConfigPath, ""},
 		"CacheEntryTTL":        {cfg.CacheEntryTTL, time.Duration(0)},
