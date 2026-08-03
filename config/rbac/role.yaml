@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: muninn-manager
+rules:
+  - apiGroups: ["muninn.io"]
+    resources: ["tenants"]
+    verbs: ["get", "list", "watch"]
+
+  - apiGroups: ["muninn.io"]
+    resources: ["tenantconfigs", "policies"]
+    verbs: ["get", "list", "watch"]

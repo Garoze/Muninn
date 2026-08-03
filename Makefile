@@ -3,6 +3,8 @@ CMD_DIR     := cmd
 BIN_DIR     := bin
 CRD_DIR     := config/crd
 SAMPLES_DIR := config/samples
+MANAGER_DIR := config/manager
+RBAC_DIR    := config/rbac
 PROTO_DIR   := proto
 PROTO_SRC   := $(PROTO_DIR)/v1
 GEN_DIR     := gen
@@ -20,7 +22,7 @@ MANAGER_BIN ?= muninn
 QUERY_BIN   ?= muninnctl
 
 .PHONY: generate test test-unit test-integration build image load lint \
-	fmt vet tidy proto install-crds sample run query describe clean
+	fmt vet tidy proto install-crds sample run query describe deploy undeploy clean
 
 # regenerate deepcopy code from kubebuilder markers
 generate:
@@ -117,6 +119,26 @@ query:
 # list the supported configuration keys the Query API will accept
 describe:
 	go run ./$(CMD_DIR)/$(QUERY_BIN) describe
+
+# deploy muninn in-cluster under its own least-privilege ServiceAccount
+# (applied in dependency order: namespace, then RBAC, then the Deployment)
+deploy:
+	kubectl apply -f $(MANAGER_DIR)/namespace.yaml
+	kubectl apply -f $(RBAC_DIR)/service_account.yaml
+	kubectl apply -f $(RBAC_DIR)/role.yaml
+	kubectl apply -f $(RBAC_DIR)/role_binding.yaml
+	kubectl apply -f $(MANAGER_DIR)/deployment.yaml
+
+# tear down everything `make deploy` created (reverse order; the namespace
+# delete alone would cascade the rest, but tearing down explicitly keeps the
+# ClusterRole/ClusterRoleBinding — cluster-scoped, so not caught by that
+# cascade — from being left behind)
+undeploy:
+	kubectl delete -f $(MANAGER_DIR)/deployment.yaml --ignore-not-found
+	kubectl delete -f $(RBAC_DIR)/role_binding.yaml --ignore-not-found
+	kubectl delete -f $(RBAC_DIR)/role.yaml --ignore-not-found
+	kubectl delete -f $(RBAC_DIR)/service_account.yaml --ignore-not-found
+	kubectl delete -f $(MANAGER_DIR)/namespace.yaml --ignore-not-found
 
 clean:
 	rm -rf $(BIN_DIR)
