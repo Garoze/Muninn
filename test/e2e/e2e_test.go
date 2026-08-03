@@ -31,11 +31,12 @@ import (
 
 const (
 	deployNamespace = "muninn-system"
-	deployAppLabel  = "app=muninn"
 	localPort       = 15010 // avoid colliding with a locally-running `make run`
 	podPort         = 5010
 	e2eTenantID     = "e2e-tenant"
 )
+
+var deployAppLabels = client.MatchingLabels{"app": "muninn"}
 
 // TestE2E deploys Muninn in-cluster via the real `make deploy` target,
 // exercises it through the actual gRPC wire protocol over a port-forward,
@@ -190,7 +191,7 @@ func runMake(t *testing.T, repoRoot, target string) {
 	}
 }
 
-// waitForPodReady polls for a Pod matching deployAppLabel in namespace to
+// waitForPodReady polls for a Pod matching deployAppLabels in namespace to
 // reach Ready, returning its name. Returns "" on timeout.
 func waitForPodReady(t *testing.T, k8sClient client.Client, namespace string, timeout time.Duration) string {
 	t.Helper()
@@ -199,7 +200,7 @@ func waitForPodReady(t *testing.T, k8sClient client.Client, namespace string, ti
 		var pods corev1.PodList
 		if err := k8sClient.List(context.Background(), &pods,
 			client.InNamespace(namespace),
-			client.MatchingLabels{"app": "muninn"},
+			deployAppLabels,
 		); err == nil {
 			for _, p := range pods.Items {
 				for _, cond := range p.Status.Conditions {
