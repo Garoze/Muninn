@@ -6,6 +6,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 
@@ -18,7 +19,9 @@ var Module = fx.Options(
 	fx.Provide(NewMetrics),
 	fx.Provide(NewGRPCListener),
 	fx.Provide(NewStandaloneHealth),
+	fx.Provide(NewTracerProvider),
 	fx.Invoke(startMetricsServer),
+	fx.Invoke(shutdownTracerProvider),
 )
 
 func newLogger() (*zap.Logger, error) {
@@ -48,6 +51,14 @@ func startMetricsServer(lc fx.Lifecycle, cfg *config.Config, log *zap.Logger) {
 		},
 		OnStop: func(ctx context.Context) error {
 			return srv.Shutdown(ctx)
+		},
+	})
+}
+
+func shutdownTracerProvider(lc fx.Lifecycle, tp *sdktrace.TracerProvider) {
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			return tp.Shutdown(ctx)
 		},
 	})
 }

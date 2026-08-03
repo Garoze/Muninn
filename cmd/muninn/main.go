@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -30,9 +32,14 @@ func startFx() (*fx.App, error) {
 
 		// gRPC server - constructed here (composition root) to avoid an
 		// import cycle between observability (listener/health) and
-		// transport/grpc (handler registration)
-		fx.Provide(func(log *zap.Logger) (*grpc.Server, *health.Server) {
-			r := observability.NewGRPCServer(log)
+		// transport/grpc (handler registration). Depends on *sdktrace.TracerProvider
+		// explicitly (not otel.GetTracerProvider()'s global) so Fx sequences
+		// NewTracerProvider before this runs - otelgrpc.NewServerHandler resolves
+		// its TracerProvider once at construction, not lazily per request.
+		fx.Provide(func(log *zap.Logger, tp *sdktrace.TracerProvider) (*grpc.Server, *health.Server) {
+			r := observability.NewGRPCServer(log,
+				grpc.StatsHandler(otelgrpc.NewServerHandler(otelgrpc.WithTracerProvider(tp))),
+			)
 			return r.Server, r.HealthServer
 		}),
 
