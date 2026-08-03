@@ -282,12 +282,16 @@ alone.
 ### Image reference must match what `make load` produces exactly
 
 `imagePullPolicy: Never` requires an exact string match against what's
-already in the node's containerd store. `make load` (`podman save | k3s ctr
-images import -`) preserves Podman's own local tag, `localhost/muninn:latest`
-— not `muninn:latest`. `deployment.yaml` references the full
-`localhost/muninn:latest` for this reason; containerd does an exact lookup
-under `Never`, not a fuzzy one, so the shorter form fails with
-`ErrImageNeverPull`.
+already in the node's containerd store, so `deployment.yaml` references
+`localhost/muninn:latest`, not `muninn:latest` — containerd does an exact
+lookup under `Never`, not a fuzzy one.
+
+`make load` tags the image with that `localhost/` prefix explicitly before
+saving (`$(CONTAINER_ENGINE) tag $(IMG) localhost/$(IMG)`), because Podman
+and Docker disagree on this by default: Podman applies a `localhost/`
+prefix to local images automatically, Docker doesn't. The explicit tag
+makes the reference identical either way, matching `CONTAINER_ENGINE`'s
+engine-agnostic design for `image`/`load`.
 
 ## End-to-end deployment test (`test/e2e`)
 

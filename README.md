@@ -222,6 +222,7 @@ the collector, storage, and UI in one container:
 podman run -d --name jaeger \
   -p 16686:16686 -p 4317:4317 \
   docker.io/jaegertracing/all-in-one:latest
+# (or `docker run` in place of `podman run` — same image, same flags)
 ```
 
 Then run Muninn pointed at it and make a call:
