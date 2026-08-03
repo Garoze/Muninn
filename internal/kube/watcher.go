@@ -348,13 +348,13 @@ func (w *Watcher) onTenantDelete(obj any) {
 		return
 	}
 
-	w.applyPatch(tenantPatch{
-		tenantID:           key,
-		clearDisplayName:   true,
-		clearRuntimeConfig: true,
-		revision:           t.ResourceVersion,
-		updated:            time.Now().UTC(),
-	})
+	// Tenant is the identity anchor, unlike TenantConfig/Policy: its deletion
+	// terminates the whole cache entry unconditionally, rather than clearing
+	// only the fields Tenant owns via applyPatch. A Tenant can legitimately
+	// exist with no TenantConfig/Policy yet, but TenantConfig/Policy without a
+	// backing Tenant is an orphan that shouldn't keep answering Query calls.
+	w.appCache.Delete(key)
+	w.metrics.CacheEntries.Set(float64(w.appCache.Len()))
 
 	w.log.Debug("deleted tenant",
 		zap.String("tenant_id", key),
