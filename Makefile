@@ -20,7 +20,7 @@ MANAGER_BIN ?= muninn
 QUERY_BIN   ?= muninnctl
 
 .PHONY: generate test test-unit test-integration build image load lint \
-	fmt vet tidy proto install-crds sample run query clean
+	fmt vet tidy proto install-crds sample run query describe clean
 
 # regenerate deepcopy code from kubebuilder markers
 generate:
@@ -112,6 +112,10 @@ query:
 		exit 1; \
 	fi
 	go run ./$(CMD_DIR)/$(QUERY_BIN) query --tenant $(TENANT) --keys $(KEYS)
+
+# list the supported configuration keys the Query API will accept
+describe:
+	go run ./$(CMD_DIR)/$(QUERY_BIN) describe
 
 clean:
 	rm -rf $(BIN_DIR)

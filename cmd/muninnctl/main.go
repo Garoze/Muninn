@@ -1,0 +1,185 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/spf13/pflag"
+
+	discoveryv1 "github.com/garoze/muninn/gen/discovery/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+const defaultAddr = "localhost:5010"
+
+// printUsage writes the top-level command overview to w.
+func printUsage(w io.Writer) {
+	fmt.Fprint(w, `muninnctl is a CLI client for Muninn's gRPC Query API.
+
+Commands:
+  query      Query configuration values for a tenant
+  describe   List supported configuration keys
+
+Usage:
+  muninnctl [flags] [command]
+
+Use "muninnctl <command> --help" for more information about a given command.
+`)
+}
+
+// setFlagUsage overrides fs's default help output with kubectl's own leaf
+// command layout: a short description, the "-x, --name" flag listing (via
+// pflag's FlagUsages, the same formatting kubectl itself uses), and a
+// trailing "Usage:" line.
+func setFlagUsage(fs *pflag.FlagSet, name, desc string) {
+	fs.Usage = func() {
+		w := fs.Output()
+		fmt.Fprintf(w, "%s\n\nFlags:\n%s\nUsage:\n  muninnctl %s [flags]\n", desc, fs.FlagUsages(), name)
+	}
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		printUsage(os.Stderr)
+		os.Exit(1)
+	}
+
+	var err error
+	switch os.Args[1] {
+	case "-h", "--help", "help":
+		printUsage(os.Stdout)
+		return
+	case "query":
+		err = cmdQuery(os.Args[2:])
+	case "describe":
+		err = cmdDescribe(os.Args[2:])
+	default:
+		fmt.Fprintf(os.Stderr, "[muninnctl] unknown command: %s\n\n", os.Args[1])
+		printUsage(os.Stderr)
+		os.Exit(1)
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[muninnctl] %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func cmdQuery(args []string) error {
+	fs := pflag.NewFlagSet("query", pflag.ExitOnError)
+	setFlagUsage(fs, "query", "Query configuration values for a tenant.")
+	addr := fs.StringP("addr", "a", defaultAddr, "muninn gRPC address (host:port)")
+	tenant := fs.StringP("tenant", "t", "", "tenant ID (required)")
+	keys := fs.StringP("keys", "k", "", "comma-separated keys (required)")
+	strict := fs.BoolP("strict", "s", false, "return InvalidArgument if any key is missing")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *tenant == "" || *keys == "" {
+		return fmt.Errorf("--tenant and --keys are required (see 'muninnctl query -h')")
+	}
+
+	conn, err := dial(*addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := discoveryv1.NewDiscoveryServiceClient(conn).Query(ctx, &discoveryv1.QueryRequest{
+		TenantId: *tenant,
+		Keys:     strings.Split(*keys, ","),
+		Strict:   *strict,
+	})
+
+	if err != nil {
+		return err
+	}
+
+	formatQueryResponse(os.Stdout, resp)
+	return nil
+}
+
+func cmdDescribe(args []string) error {
+	fs := pflag.NewFlagSet("describe", pflag.ExitOnError)
+	setFlagUsage(fs, "describe", "List supported configuration keys.")
+	addr := fs.StringP("addr", "a", defaultAddr, "muninn gRPC address (host:port)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	conn, err := dial(*addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := discoveryv1.NewDiscoveryServiceClient(conn).Describe(ctx, &discoveryv1.DescribeRequest{})
+	if err != nil {
+		return err
+	}
+
+	formatDescribeResponse(os.Stdout, resp)
+	return nil
+}
+
+// dial opens a plain-text gRPC connection to addr.
+// insecure.NewCredentials() is intentional: muninnctl is a dev/ops tool
+// for use inside a cluster or over a local port-forward. TLS is expected
+// to be terminated at the ingress or service-mesh layer. mTLS support is
+// out of scope for this tool.
+func dial(addr string) (*grpc.ClientConn, error) {
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, fmt.Errorf("dial %s: %w", addr, err)
+	}
+
+	return conn, nil
+}
+
+// formatQueryResponse writes query results as tab-aligned columns to w.
+// Extracted so it can be unit-tested without a live server.
+func formatQueryResponse(w io.Writer, resp *discoveryv1.QueryResponse) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "KEY\tVALUE\tSOURCE")
+	for _, kv := range resp.GetValues() {
+		fmt.Fprintf(tw, "%s\t%v\t%s\n",
+			kv.GetKey(),
+			kv.GetValue().AsInterface(),
+			kv.GetSource(),
+		)
+	}
+	tw.Flush()
+
+	if len(resp.GetMissingKeys()) > 0 {
+		fmt.Fprintf(w, "\nmissing: %s\n", strings.Join(resp.GetMissingKeys(), ", "))
+	}
+}
+
+// formatDescribeResponse writes supported keys as tab-aligned columns to w.
+// Extracted so it can be unit-tested without a live server.
+func formatDescribeResponse(w io.Writer, resp *discoveryv1.DescribeResponse) {
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "KEY\tTYPE\tDESCRIPTION")
+	for _, k := range resp.GetSupportedKeys() {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n",
+			k.GetKey(),
+			k.GetTypeHint(),
+			k.GetDescription(),
+		)
+	}
+	tw.Flush()
+}
