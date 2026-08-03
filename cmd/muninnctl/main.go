@@ -18,9 +18,12 @@ import (
 
 const defaultAddr = "localhost:5010"
 
-// printUsage writes the top-level command overview to w.
+// printUsage writes the top-level command overview to w. The write error is
+// deliberately discarded: this is help text printed immediately before the
+// program exits or returns, so a failed write (e.g. closed stdout pipe)
+// isn't something the CLI could act on differently.
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `muninnctl is a CLI client for Muninn's gRPC Query API.
+	_, _ = fmt.Fprint(w, `muninnctl is a CLI client for Muninn's gRPC Query API.
 
 Commands:
   query      Query configuration values for a tenant
@@ -36,11 +39,12 @@ Use "muninnctl <command> --help" for more information about a given command.
 // setFlagUsage overrides fs's default help output with kubectl's own leaf
 // command layout: a short description, the "-x, --name" flag listing (via
 // pflag's FlagUsages, the same formatting kubectl itself uses), and a
-// trailing "Usage:" line.
+// trailing "Usage:" line. Write error discarded for the same reason as
+// printUsage above.
 func setFlagUsage(fs *pflag.FlagSet, name, desc string) {
 	fs.Usage = func() {
 		w := fs.Output()
-		fmt.Fprintf(w, "%s\n\nFlags:\n%s\nUsage:\n  muninnctl %s [flags]\n", desc, fs.FlagUsages(), name)
+		_, _ = fmt.Fprintf(w, "%s\n\nFlags:\n%s\nUsage:\n  muninnctl %s [flags]\n", desc, fs.FlagUsages(), name)
 	}
 }
 
@@ -91,7 +95,11 @@ func cmdQuery(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "[muninnctl] warning: closing connection: %v\n", cerr)
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -106,8 +114,7 @@ func cmdQuery(args []string) error {
 		return err
 	}
 
-	formatQueryResponse(os.Stdout, resp)
-	return nil
+	return formatQueryResponse(os.Stdout, resp)
 }
 
 func cmdDescribe(args []string) error {
@@ -122,7 +129,11 @@ func cmdDescribe(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			fmt.Fprintf(os.Stderr, "[muninnctl] warning: closing connection: %v\n", cerr)
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -132,8 +143,7 @@ func cmdDescribe(args []string) error {
 		return err
 	}
 
-	formatDescribeResponse(os.Stdout, resp)
-	return nil
+	return formatDescribeResponse(os.Stdout, resp)
 }
 
 // dial opens a plain-text gRPC connection to addr.
@@ -152,34 +162,45 @@ func dial(addr string) (*grpc.ClientConn, error) {
 
 // formatQueryResponse writes query results as tab-aligned columns to w.
 // Extracted so it can be unit-tested without a live server.
-func formatQueryResponse(w io.Writer, resp *discoveryv1.QueryResponse) {
+//
+// Writes into tw are deliberately unchecked: tabwriter buffers them
+// internally and only performs real I/O on Flush, so the first genuine
+// write failure surfaces there (or on the direct write to w below), not on
+// any individual buffered call.
+func formatQueryResponse(w io.Writer, resp *discoveryv1.QueryResponse) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "KEY\tVALUE\tSOURCE")
+	_, _ = fmt.Fprintln(tw, "KEY\tVALUE\tSOURCE")
 	for _, kv := range resp.GetValues() {
-		fmt.Fprintf(tw, "%s\t%v\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%v\t%s\n",
 			kv.GetKey(),
 			kv.GetValue().AsInterface(),
 			kv.GetSource(),
 		)
 	}
-	tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
 
 	if len(resp.GetMissingKeys()) > 0 {
-		fmt.Fprintf(w, "\nmissing: %s\n", strings.Join(resp.GetMissingKeys(), ", "))
+		if _, err := fmt.Fprintf(w, "\nmissing: %s\n", strings.Join(resp.GetMissingKeys(), ", ")); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // formatDescribeResponse writes supported keys as tab-aligned columns to w.
-// Extracted so it can be unit-tested without a live server.
-func formatDescribeResponse(w io.Writer, resp *discoveryv1.DescribeResponse) {
+// Extracted so it can be unit-tested without a live server. See
+// formatQueryResponse for why writes into tw are unchecked.
+func formatDescribeResponse(w io.Writer, resp *discoveryv1.DescribeResponse) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "KEY\tTYPE\tDESCRIPTION")
+	_, _ = fmt.Fprintln(tw, "KEY\tTYPE\tDESCRIPTION")
 	for _, k := range resp.GetSupportedKeys() {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n",
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
 			k.GetKey(),
 			k.GetTypeHint(),
 			k.GetDescription(),
 		)
 	}
-	tw.Flush()
+	return tw.Flush()
 }

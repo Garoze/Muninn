@@ -24,7 +24,9 @@ func TestFormatQueryResponse(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	formatQueryResponse(&buf, resp)
+	if err := formatQueryResponse(&buf, resp); err != nil {
+		t.Fatalf("formatQueryResponse: %v", err)
+	}
 	out := buf.String()
 
 	if !strings.Contains(out, "TENANT.id") || !strings.Contains(out, "acme-corp") || !strings.Contains(out, "Tenant") {
@@ -39,7 +41,9 @@ func TestFormatQueryResponse_NoMissingKeys(t *testing.T) {
 	resp := &discoveryv1.QueryResponse{}
 
 	var buf bytes.Buffer
-	formatQueryResponse(&buf, resp)
+	if err := formatQueryResponse(&buf, resp); err != nil {
+		t.Fatalf("formatQueryResponse: %v", err)
+	}
 	out := buf.String()
 
 	if strings.Contains(out, "missing:") {
@@ -55,7 +59,9 @@ func TestFormatDescribeResponse(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	formatDescribeResponse(&buf, resp)
+	if err := formatDescribeResponse(&buf, resp); err != nil {
+		t.Fatalf("formatDescribeResponse: %v", err)
+	}
 	out := buf.String()
 
 	if !strings.Contains(out, "TENANT.id") || !strings.Contains(out, "string") || !strings.Contains(out, "Tenant identifier") {
