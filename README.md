@@ -218,6 +218,12 @@ make test-integration     # runs test/integration/envtest against a local,
                           # not your real cluster. Requires KUBEBUILDER_ASSETS;
                           # see Prerequisites.
 make test                 # both
+
+make test-e2e              # deploys against your real cluster via `make
+                           # deploy`, exercises it over gRPC, tears down via
+                           # `make undeploy`. Requires the image already
+                           # built and loaded (`make image load`). Not part
+                           # of `make test` or CI — see docs/design.md.
 ```
 
 Unit coverage spans the domain layer (`internal/app`), the gRPC↔domain
@@ -237,6 +243,7 @@ guarantee described above.
 | `make sample` / `make sample-status`           | Apply sample fixtures / patch sample status                               |
 | `make run`                                     | Run the server locally against `$KUBECONFIG`                              |
 | `make test` / `test-unit` / `test-integration` | Run tests                                                                 |
+| `make test-e2e`                                | Deploy + exercise + tear down against your real cluster (not part of `make test`) |
 | `make query TENANT=<id> KEYS=<a,b,c>`          | Query keys for a tenant via `muninnctl`                                   |
 | `make describe`                                | List supported configuration keys via `muninnctl`                         |
 | `make fmt` / `vet` / `lint` / `tidy`           | Standard Go hygiene                                                       |
@@ -254,11 +261,11 @@ a container image (multi-stage, distroless, verified end-to-end into a local
 k3s node), in-cluster deployment under a least-privilege `ServiceAccount`
 (`config/manager/`, `config/rbac/`), integration tests against a real API
 server via [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)
-(`test/integration/envtest`, also wired into CI), Fx-based dependency wiring,
-and unit test coverage across every package. What's still ahead:
+(`test/integration/envtest`, also wired into CI), an end-to-end deployment
+test against a real cluster (`test/e2e`, local-only — see `docs/design.md`
+for why it's not in CI), Fx-based dependency wiring, and unit test coverage
+across every package. What's still ahead:
 
-- `test/e2e/` — a real k3s cluster test (not `envtest`) exercising the built
-  image through the actual deployment manifests
 - OpenTelemetry tracing (not yet a dependency)
 
 ## License

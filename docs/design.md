@@ -289,3 +289,39 @@ images import -`) preserves Podman's own local tag, `localhost/muninn:latest`
 under `Never`, not a fuzzy one, so the shorter form fails with
 `ErrImageNeverPull`.
 
+## End-to-end deployment test (`test/e2e`)
+
+`test/e2e/e2e_test.go` deploys Muninn against a real cluster and exercises it
+over the actual gRPC wire protocol, verifying the container image, the
+`ClusterRole` scope, and the readiness probe all work together in practice —
+none of which a throwaway `envtest` control plane can check.
+
+The test deploys and tears down by running `make deploy`/`make undeploy` as
+subprocesses, rather than applying the manifests via `controller-runtime`'s
+client directly (the pattern `test/integration/envtest` uses for its own
+fixtures). This exercises the same deploy path a person runs by hand.
+
+The image must already be built and loaded (`make image load`) before
+running this test — it doesn't do either itself, since `make load` requires
+interactive `sudo`, which a test process has no way to satisfy. If the image
+isn't loaded, the Pod's containers sit in `ErrImageNeverPull`; the test
+detects that specific condition and skips with a message naming the missing
+step, rather than failing on an unrelated-looking timeout.
+
+Reaching the Pod goes through `k8s.io/client-go/tools/portforward`, used
+directly rather than a `kubectl port-forward` subprocess — the library
+manages the tunnel's readiness and shutdown safely, which a background
+process would require additional supervision code to guarantee.
+
+Assertions go through `discoveryv1.DiscoveryServiceClient` against structured
+`QueryResponse` fields, not `muninnctl`'s CLI output — `muninnctl`'s
+formatting already has its own unit test coverage
+(`cmd/muninnctl/main_test.go`); this test verifies the deployed server's
+actual responses over the network.
+
+This test runs locally only (`make test-e2e`), not in CI. A full CI job would
+need a real k3s cluster provisioned in the runner — installing k3s, building
+and importing the image, deploying, querying, tearing down — a much heavier
+and slower job than `envtest`'s two-binaries-and-go-test setup, for a
+portfolio project where a live demo already covers the same signal.
+
