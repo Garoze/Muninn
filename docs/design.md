@@ -325,3 +325,52 @@ and importing the image, deploying, querying, tearing down — a much heavier
 and slower job than `envtest`'s two-binaries-and-go-test setup, for a
 portfolio project where a live demo already covers the same signal.
 
+## OpenTelemetry tracing
+
+`internal/observability/tracing.go` produces a span for every gRPC call via
+`otelgrpc.NewServerHandler()`, exported over OTLP to `cfg.OTELExporterEndpoint`.
+
+### `ParentBased` sampling honors inbound sampled traces
+
+The sampler is `sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.TraceSampleRatio))`,
+not a bare ratio-based sampler. `TraceSampleRatio` only governs the sampling
+rate for spans Muninn itself originates as a root — a caller's own sampling
+decision, carried in the request's trace context, is always honored if
+present. This matters for a service other things call *into*: if an upstream
+caller already decided a request is worth tracing end-to-end, Muninn
+shouldn't independently re-roll that decision and drop its own span from the
+trace.
+
+Covered in `tracing_test.go`: an unparented span is dropped at
+`sampleRatio=0`, but a span whose incoming context already carries a sampled
+parent is still recorded regardless of `sampleRatio`.
+
+### `NewTracerProvider` split for testability
+
+`NewTracerProvider(cfg *config.Config)` builds the real OTLP gRPC exporter
+and delegates to an unexported `newTracerProvider(exp sdktrace.SpanExporter,
+sampleRatio float64)`, which does the actual `Resource`/`Sampler`/
+`TracerProvider` construction. This mirrors `NewMetrics(reg
+prometheus.Registerer)` taking its registry as a parameter rather than
+constructing one internally — the exporter is the dependency that needs to
+be swappable for `tracing_test.go` to inject `tracetest.NewInMemoryExporter()`
+without a real OTLP collector.
+
+### gRPC server depends on `*sdktrace.TracerProvider` explicitly, not the OTel global
+
+`otelgrpc.NewServerHandler()` resolves its `TracerProvider` once at
+construction time, not lazily per request. The gRPC server's constructor in
+`cmd/muninn/main.go` takes `*sdktrace.TracerProvider` as an explicit Fx
+parameter, rather than reading `otel.GetTracerProvider()` — the package-level
+global `NewTracerProvider` also sets. Fx's dependency graph sequences
+constructors by their parameters, so this guarantees `NewTracerProvider` runs
+before the gRPC server is built, without depending on incidental global
+mutation order.
+
+### Scope: server-side spans only
+
+Outbound calls from `internal/kube` to the Kubernetes API aren't traced —
+that would mean wrapping the `rest.Config`'s `http.RoundTripper`, a real
+possible extension but a second surface area for what's already the
+lowest-priority item in the project's scope.
+

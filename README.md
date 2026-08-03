@@ -212,12 +212,12 @@ make query TENANT=arasaka KEYS=TENANT.id
 ## Testing
 
 ```bash
-make test-unit            # go test ./... -short — no cluster required
-make test-integration     # runs test/integration/envtest against a local,
-                          # throwaway control plane (etcd + kube-apiserver) —
-                          # not your real cluster. Requires KUBEBUILDER_ASSETS;
-                          # see Prerequisites.
-make test                 # both
+make test-unit             # go test ./... -short — no cluster required
+make test-integration      # runs test/integration/envtest against a local,
+                           # throwaway control plane (etcd + kube-apiserver) —
+                           # not your real cluster. Requires KUBEBUILDER_ASSETS;
+                           # see Prerequisites.
+make test                  # both
 
 make test-e2e              # deploys against your real cluster via `make
                            # deploy`, exercises it over gRPC, tears down via
@@ -263,10 +263,13 @@ k3s node), in-cluster deployment under a least-privilege `ServiceAccount`
 server via [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)
 (`test/integration/envtest`, also wired into CI), an end-to-end deployment
 test against a real cluster (`test/e2e`, local-only — see `docs/design.md`
-for why it's not in CI), Fx-based dependency wiring, and unit test coverage
-across every package. What's still ahead:
+for why it's not in CI), OpenTelemetry tracing on every gRPC call (OTLP
+exporter, `ParentBased` sampling — see `docs/design.md`), Fx-based
+dependency wiring, and unit test coverage across every package. What's
+still ahead:
 
-- OpenTelemetry tracing (not yet a dependency)
+- A local trace viewer (Jaeger all-in-one) documented for actually looking
+  at what the tracing above produces — see `docs/design.md`
 
 ## License
 
