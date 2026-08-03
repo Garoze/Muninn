@@ -228,3 +228,64 @@ composition root), not inside `observability.Module` or
 `transport/grpc`, base listener/health lives in `observability`; something
 above both has to wire them together).
 
+## In-cluster deployment (`config/manager/`, `config/rbac/`)
+
+Muninn deploys under its own least-privilege `ServiceAccount`
+(`config/manager/deployment.yaml`, `config/rbac/`), not the cluster-admin
+permissions convenient for local development.
+
+### `ClusterRole`, not `Role`, for namespace-scoped CRDs
+
+`TenantConfig`/`Policy` are namespace-scoped, but they live across a
+dynamically-created namespace *per tenant* (`tenant-<id>`) — there's no fixed
+namespace to bind a `Role`/`RoleBinding` to. A `ClusterRole` bound via
+`ClusterRoleBinding` is the correct pattern for a watcher whose namespaced
+resources span an open-ended, growing set of namespaces, even though the
+resources themselves aren't cluster-scoped. `Tenant` (genuinely
+cluster-scoped) and `TenantConfig`/`Policy` (namespace-scoped but
+multi-namespace) end up needing the same kind of binding for different
+reasons — one `ClusterRole` covers all three, since they share the
+`muninn.io` API group.
+
+`role.yaml` doesn't grant `tenants/status` — that subresource permission
+only matters for *writing* status (or a direct GET on the status subresource
+endpoint). The watcher only ever does `get`/`list`/`watch` on the base
+resources via `controller-runtime`'s informer cache, which already returns
+the full object including `.status`.
+
+### No leader-election RBAC
+
+kubebuilder scaffolds `leader_election_role.yaml` by default because a
+reconciling controller needs exactly one active replica holding a lock.
+Muninn isn't a reconciler — it's a stateless read-through cache. Multiple
+replicas each independently watch and serve without coordination, so there's
+no lock to grant RBAC for.
+
+### Readiness probe wired to the actual health service
+
+`deployment.yaml`'s `readinessProbe`/`livenessProbe` use Kubernetes' native
+gRPC probe (`grpc: {port: 5011}`, stable since 1.24) against the same health
+server the "Readiness gating" design decision above describes. A pod whose
+informer cache hasn't finished its initial sync is held out of rotation by
+Kubernetes itself, not just by an internal flag nothing outside the process
+reads.
+
+### `securityContext` matches the `distroless:nonroot` image
+
+`runAsNonRoot: true`, `readOnlyRootFilesystem: true`,
+`allowPrivilegeEscalation: false`, `capabilities: {drop: ["ALL"]}` — Pod-level
+enforcement of the same hardening the `gcr.io/distroless/static:nonroot` base
+image already provides by default. The image runs non-root on its own, but
+the cluster enforces it independently rather than relying on image behavior
+alone.
+
+### Image reference must match what `make load` produces exactly
+
+`imagePullPolicy: Never` requires an exact string match against what's
+already in the node's containerd store. `make load` (`podman save | k3s ctr
+images import -`) preserves Podman's own local tag, `localhost/muninn:latest`
+— not `muninn:latest`. `deployment.yaml` references the full
+`localhost/muninn:latest` for this reason; containerd does an exact lookup
+under `Never`, not a fuzzy one, so the shorter form fails with
+`ErrImageNeverPull`.
+

@@ -188,6 +188,27 @@ Live cluster changes are reflected without restarting the process — try
 '{"spec":{"runtimeConfig":{"NEW_KEY":"value"}}}'` and re-run the `Query`
 call for `TENANT.runtime`.
 
+### Deploy it in-cluster
+
+`make run` above runs Muninn on your host, against whatever `$KUBECONFIG`
+you have — convenient for development, but not how it'd actually run in
+production. `make deploy` runs it as a Pod, under its own least-privilege
+`ServiceAccount`, instead:
+
+```bash
+make image      # build the image
+make load       # import it into k3s's containerd store
+make deploy     # apply config/manager/ + config/rbac/
+```
+
+```bash
+kubectl get pods -n muninn-system   # should reach 1/1 Running
+kubectl port-forward -n muninn-system deploy/muninn 5010:5010 &
+make query TENANT=arasaka KEYS=TENANT.id
+```
+
+`make undeploy` tears it back down.
+
 ## Testing
 
 ```bash
@@ -221,6 +242,8 @@ guarantee described above.
 | `make fmt` / `vet` / `lint` / `tidy`           | Standard Go hygiene                                                       |
 | `make proto`                                   | Regenerate gRPC stubs from `proto/v1/discovery.proto` (requires `protoc`) |
 | `make build`                                   | Compile `cmd/` entrypoints into `bin/`                                    |
+| `make image` / `load`                          | Build the container image / import it into k3s's containerd store        |
+| `make deploy` / `undeploy`                     | Apply / tear down Muninn in-cluster under its own ServiceAccount          |
 
 ## Status
 
@@ -228,17 +251,14 @@ This is an actively developed portfolio project, not a finished product.
 What's solid today: CRD watching, patch-based cache merge, the full gRPC
 Query/Describe API, `muninnctl` (a kubectl-style CLI for `query`/`describe`),
 a container image (multi-stage, distroless, verified end-to-end into a local
-k3s node), integration tests against a real API server via
-[`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)
+k3s node), in-cluster deployment under a least-privilege `ServiceAccount`
+(`config/manager/`, `config/rbac/`), integration tests against a real API
+server via [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)
 (`test/integration/envtest`, also wired into CI), Fx-based dependency wiring,
 and unit test coverage across every package. What's still ahead:
 
-- `config/manager/` (Deployment) + `config/rbac/` (ServiceAccount,
-  ClusterRole/Role/RoleBinding) — actually deploying Muninn in-cluster under
-  least-privilege permissions, instead of only ever running via `make run`
-  against a developer's own full-admin kubeconfig
 - `test/e2e/` — a real k3s cluster test (not `envtest`) exercising the built
-  image once the above deployment manifests exist
+  image through the actual deployment manifests
 - OpenTelemetry tracing (not yet a dependency)
 
 ## License
