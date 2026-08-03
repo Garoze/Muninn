@@ -50,7 +50,7 @@ jobs:
         run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
       - name: fetch envtest binaries (etcd, kube-apiserver)
         run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use -p path)" >> "$GITHUB_ENV"
-      - run: MUNINN_IT_ENVTEST=1 go test ./test/... -run TestWatcherProjection -v
+      - run: MUNINN_IT_ENVTEST=1 go test ./test/... -run TestWatcherProjection -v -count=1
 
   generated-code:
     runs-on: ubuntu-latest

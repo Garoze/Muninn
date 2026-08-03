@@ -76,7 +76,7 @@ test-unit:
 # exercises envtest (a local, throwaway control plane); requires KUBEBUILDER_ASSETS
 # (see https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest and `setup-envtest`)
 test-integration:
-	MUNINN_IT_ENVTEST=1 go test ./test/... -run TestWatcherProjection -v
+	MUNINN_IT_ENVTEST=1 go test ./test/... -run TestWatcherProjection -v -count=1
 
 # deploys against your real cluster via `make deploy`/`undeploy` and exercises
 # it over a port-forward. Requires the image already built and loaded
