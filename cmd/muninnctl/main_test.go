@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -9,6 +10,14 @@ import (
 
 	discoveryv1 "github.com/garoze/muninn/gen/discovery/v1"
 )
+
+// errWriter always fails, to exercise the error-propagation path (Flush's
+// return value) rather than just the happy-path formatting.
+type errWriter struct{}
+
+func (errWriter) Write(p []byte) (int, error) {
+	return 0, errors.New("write failed")
+}
 
 func TestFormatQueryResponse(t *testing.T) {
 	value, err := structpb.NewValue("acme-corp")
@@ -66,5 +75,48 @@ func TestFormatDescribeResponse(t *testing.T) {
 
 	if !strings.Contains(out, "TENANT.id") || !strings.Contains(out, "string") || !strings.Contains(out, "Tenant identifier") {
 		t.Errorf("expected supported key row in output, got:\n%s", out)
+	}
+}
+
+func TestFormatQueryResponse_WriteError(t *testing.T) {
+	resp := &discoveryv1.QueryResponse{
+		Values: []*discoveryv1.KeyValue{{Key: "TENANT.id", Source: "Tenant"}},
+	}
+
+	if err := formatQueryResponse(errWriter{}, resp); err == nil {
+		t.Fatal("expected an error from a failing writer, got nil")
+	}
+}
+
+func TestFormatDescribeResponse_WriteError(t *testing.T) {
+	resp := &discoveryv1.DescribeResponse{
+		SupportedKeys: []*discoveryv1.SupportedKey{{Key: "TENANT.id"}},
+	}
+
+	if err := formatDescribeResponse(errWriter{}, resp); err == nil {
+		t.Fatal("expected an error from a failing writer, got nil")
+	}
+}
+
+func TestCmdQuery_MissingRequiredFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"no flags", nil},
+		{"tenant only", []string{"--tenant", "arasaka"}},
+		{"keys only", []string{"--keys", "TENANT.id"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := cmdQuery(tt.args)
+			if err == nil {
+				t.Fatal("expected an error for missing --tenant/--keys, got nil")
+			}
+			if !strings.Contains(err.Error(), "--tenant and --keys are required") {
+				t.Errorf("unexpected error message: %v", err)
+			}
+		})
 	}
 }
