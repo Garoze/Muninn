@@ -209,6 +209,38 @@ make query TENANT=arasaka KEYS=TENANT.id
 
 `make undeploy` tears it back down.
 
+### View traces
+
+Muninn exports an OpenTelemetry span for every gRPC call over OTLP to
+`$OTEL_EXPORTER_OTLP_ENDPOINT` (default `localhost:4317`). Nothing needs to
+be listening there for Muninn to run — spans just fail to export silently if
+it's unset or unreachable. To actually see them, run
+[Jaeger](https://www.jaegertracing.io/)'s all-in-one image, which bundles
+the collector, storage, and UI in one container:
+
+```bash
+podman run -d --name jaeger \
+  -p 16686:16686 -p 4317:4317 \
+  docker.io/jaegertracing/all-in-one:latest
+```
+
+Then run Muninn pointed at it and make a call:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+export OTEL_TRACES_SAMPLE_ARG=1   # sample everything for this demo — the
+                                  # default 0.1 means a single manual query
+                                  # has only a 10% chance of being recorded
+make run
+```
+
+```bash
+make query TENANT=arasaka KEYS=TENANT.id
+```
+
+Open `http://localhost:16686`, select the `muninn` service, and find the
+trace for that `Query` call.
+
 ## Testing
 
 ```bash
@@ -254,22 +286,20 @@ guarantee described above.
 
 ## Status
 
-This is an actively developed portfolio project, not a finished product.
-What's solid today: CRD watching, patch-based cache merge, the full gRPC
-Query/Describe API, `muninnctl` (a kubectl-style CLI for `query`/`describe`),
-a container image (multi-stage, distroless, verified end-to-end into a local
-k3s node), in-cluster deployment under a least-privilege `ServiceAccount`
-(`config/manager/`, `config/rbac/`), integration tests against a real API
-server via [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)
-(`test/integration/envtest`, also wired into CI), an end-to-end deployment
-test against a real cluster (`test/e2e`, local-only — see `docs/design.md`
-for why it's not in CI), OpenTelemetry tracing on every gRPC call (OTLP
-exporter, `ParentBased` sampling — see `docs/design.md`), Fx-based
-dependency wiring, and unit test coverage across every package. What's
-still ahead:
+This is an actively developed portfolio project. Everything originally
+scoped is done:
 
-- A local trace viewer (Jaeger all-in-one) documented for actually looking
-  at what the tracing above produces — see `docs/design.md`
+- CRD watching, patch-based cache merge across `Tenant`/`TenantConfig`/`Policy`
+- The full gRPC Query/Describe API
+- `muninnctl` — a kubectl-style CLI for `query`/`describe`
+- A container image (multi-stage, distroless, verified end-to-end into a local k3s node)
+- In-cluster deployment under a least-privilege `ServiceAccount` (`config/manager/`, `config/rbac/`)
+- Integration tests against a real API server via [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest) (also wired into CI)
+- An end-to-end deployment test against a real cluster (`test/e2e`, local-only — see `docs/design.md` for why it's not in CI)
+- OpenTelemetry tracing on every gRPC call, `ParentBased` sampling, with a Jaeger walkthrough for viewing it (see `docs/design.md`)
+- Fx-based dependency wiring and unit test coverage across every package
+
+Further additions would be new scope, not a backlog being worked through.
 
 ## License
 
