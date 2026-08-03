@@ -39,6 +39,19 @@ jobs:
           go-version-file: go.mod
       - run: go test ./... -short
 
+  test-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install setup-envtest
+        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+      - name: fetch envtest binaries (etcd, kube-apiserver)
+        run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use -p path)" >> "$GITHUB_ENV"
+      - run: MUNINN_IT_ENVTEST=1 go test ./test/... -run TestWatcherProjection -v
+
   generated-code:
     runs-on: ubuntu-latest
     steps:

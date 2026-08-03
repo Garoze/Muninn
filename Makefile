@@ -71,9 +71,10 @@ test: test-unit test-integration
 test-unit:
 	go test ./... -short
 
-# exercises real dependencies (e.g. a k3s cluster); requires KUBECONFIG
+# exercises envtest (a local, throwaway control plane); requires KUBEBUILDER_ASSETS
+# (see https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest and `setup-envtest`)
 test-integration:
-	go test ./... -tags=integration -run Integration
+	MUNINN_IT_ENVTEST=1 go test ./test/... -run TestWatcherProjection -v
 
 # override the detected engine with: make image CONTAINER_ENGINE=docker
 image:
