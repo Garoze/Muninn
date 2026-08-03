@@ -4,10 +4,10 @@
 
 ## Context
 
-The layered-configuration-merge pattern this service's data would
-typically feed into — a pluggable, layered loader on the consuming
-side — already exists as separately-built code against a real
-production system.
+A client consuming this service's data would typically merge it through
+a layered, pluggable loader — a pattern that solves a different
+engineering problem than watching and caching Kubernetes custom
+resources, which is what this repository exists to demonstrate.
 
 ## Decision
 
@@ -16,11 +16,10 @@ repository.
 
 ## Alternatives considered
 
-- **Ship a thin client library alongside this service.** Rejected for
-  this repository's scope specifically: the engineering problem it
-  would demonstrate is already demonstrated elsewhere, and bundling it
-  here would blur two distinct pieces of work into one rather than add
-  new signal.
+- **Ship a thin client library alongside this service.** Rejected: it
+  addresses a distinct problem from this repository's own scope, and
+  bundling it here would blur two separable concerns into one project
+  rather than sharpen either.
 
 ## Consequences
 

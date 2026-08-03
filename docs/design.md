@@ -46,13 +46,13 @@ contract, not on Kubernetes object internals.
   observability) in a form defensible on its own technical merits.
 
 **Non-goals:**
-- A general-purpose client library or configuration SDK. That pattern
-  (layered config merge, pluggable loaders) already exists as proprietary
-  code the author built against a real production system; duplicating it
-  here would demonstrate the same skill twice rather than add new signal.
-  If it's ever built as a portfolio artifact, it belongs in its own
-  standalone, generic repository — not bolted onto a service that
-  consumes it.
+- A general-purpose client library or configuration SDK. Merging layered
+  configuration through a pluggable loader on the consuming side is a
+  distinct engineering problem from the CRD-watching and caching this
+  service demonstrates. Bundling both into one repository would blur
+  two separable concerns instead of sharpening either. If it's ever
+  built, it belongs in its own standalone, generic repository — not
+  bolted onto the service it would consume.
 - A reconciler or control loop. Muninn never writes Kubernetes objects.
   It is a read-through cache, not a controller, and carries no
   reconciliation or write-path responsibility.
@@ -624,18 +624,18 @@ question comes up again later.
 **Decision:** No client library or configuration-loading SDK ships
 alongside this service.
 
-**Motivation:** This exact problem — merging layered configuration from
-multiple sources through a pluggable loader — has already been solved by
-the author as proprietary code against a real production system.
-Reimplementing that pattern here would demonstrate the same skill a
-second time rather than add new signal to this project specifically.
+**Motivation:** Merging layered configuration from multiple sources
+through a pluggable loader is a distinct engineering problem from
+watching and caching Kubernetes custom resources — the problem this
+service actually exists to demonstrate. Building both into one
+repository would blur two separable concerns rather than sharpen
+either.
 
 **Alternatives considered:**
-- Ship a thin client library alongside this service — rejected for this
-  repository's scope: the interesting engineering problem it would
-  demonstrate is already demonstrated elsewhere; bolting a copy onto a
-  service that consumes it would blur two distinct portfolio artifacts
-  into one.
+- Ship a thin client library alongside this service — rejected: it
+  addresses a different problem than this service's own scope; bolting
+  it onto the service it would consume would blur two distinct
+  portfolio artifacts into one instead of sharpening either.
 
 **Tradeoffs:** Anyone using this service today writes their own gRPC
 client call rather than importing a purpose-built one. If this pattern
