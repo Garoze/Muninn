@@ -21,7 +21,7 @@ KEYS   ?=
 MANAGER_BIN ?= muninn
 QUERY_BIN   ?= muninnctl
 
-.PHONY: generate test test-unit test-integration build image load lint \
+.PHONY: generate test test-unit test-integration test-e2e build image load lint \
 	fmt vet tidy proto install-crds sample run query describe deploy undeploy clean
 
 # regenerate deepcopy code from kubebuilder markers
@@ -77,6 +77,13 @@ test-unit:
 # (see https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest and `setup-envtest`)
 test-integration:
 	MUNINN_IT_ENVTEST=1 go test ./test/... -run TestWatcherProjection -v
+
+# deploys against your real cluster via `make deploy`/`undeploy` and exercises
+# it over a port-forward. Requires the image already built and loaded
+# (`make image load` — not run automatically here, since `load` needs
+# interactive sudo). Not part of `make test` or CI — see docs/design.md.
+test-e2e:
+	MUNINN_IT_E2E=1 go test ./test/e2e/... -run TestE2E -v -timeout 5m -count=1
 
 # override the detected engine with: make image CONTAINER_ENGINE=docker
 image:
