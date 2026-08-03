@@ -107,9 +107,9 @@ exists here.
   against [k3s](https://k3s.io/); any cluster works)
 - [`controller-gen`](https://github.com/kubernetes-sigs/controller-tools)
   on `PATH` (`go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest`)
-- [`grpcurl`](https://github.com/fullstorydev/grpcurl) (optional, for
-  exercising the API by hand — the server registers gRPC reflection, so no
-  `.proto` files are needed client-side)
+- [`grpcurl`](https://github.com/fullstorydev/grpcurl) (optional — for
+  hitting the API directly instead of through `muninnctl`; the server
+  registers gRPC reflection, so no `.proto` files are needed client-side)
 
 ### Install the CRDs
 
@@ -160,9 +160,18 @@ and watching"`) and the gRPC server binding `:5010` (configurable via
 
 ```bash
 # discover the supported key namespace
-grpcurl -plaintext localhost:5010 discovery.v1.DiscoveryService/Describe
+make describe
 
 # query specific keys for the sample tenant
+make query TENANT=arasaka KEYS=TENANT.id,TENANT.displayName,TENANT.resources.identityPoolID
+```
+
+Or hit the API directly with `grpcurl`, since the server registers gRPC
+reflection:
+
+```bash
+grpcurl -plaintext localhost:5010 discovery.v1.DiscoveryService/Describe
+
 grpcurl -plaintext -d '{
   "tenant_id": "arasaka",
   "keys": ["TENANT.id", "TENANT.displayName", "TENANT.resources.identityPoolID"]
@@ -201,6 +210,8 @@ guarantee described above.
 | `make sample` / `make sample-status`           | Apply sample fixtures / patch sample status                               |
 | `make run`                                     | Run the server locally against `$KUBECONFIG`                              |
 | `make test` / `test-unit` / `test-integration` | Run tests                                                                 |
+| `make query TENANT=<id> KEYS=<a,b,c>`          | Query keys for a tenant via `muninnctl`                                   |
+| `make describe`                                | List supported configuration keys via `muninnctl`                         |
 | `make fmt` / `vet` / `lint` / `tidy`           | Standard Go hygiene                                                       |
 | `make proto`                                   | Regenerate gRPC stubs from `proto/v1/discovery.proto` (requires `protoc`) |
 | `make build`                                   | Compile `cmd/` entrypoints into `bin/`                                    |
@@ -209,8 +220,9 @@ guarantee described above.
 
 This is an actively developed portfolio project, not a finished product.
 What's solid today: CRD watching, patch-based cache merge, the full gRPC
-Query/Describe API, Fx-based dependency wiring, and unit test coverage
-across every package. What's still ahead:
+Query/Describe API, `muninnctl` (a kubectl-style CLI for `query`/`describe`),
+Fx-based dependency wiring, and unit test coverage across every package.
+What's still ahead:
 
 - Integration tests against a real API server via
   [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)
@@ -219,7 +231,7 @@ across every package. What's still ahead:
   (`internal/kube/watcher_test.go` covers the pure patch/extraction logic
   underneath it)
 - Container image build (`Dockerfile` doesn't exist yet — `make
-  image`/`load` are placeholders)
+  image`/`load` are functional but have nothing to build without it)
 - OpenTelemetry tracing (not yet a dependency)
 
 ## License
