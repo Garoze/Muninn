@@ -67,6 +67,11 @@ stays ignorant of both.
 
 ## Design decisions
 
+> [!NOTE]
+> See [`docs/design.md`](docs/design.md) for the full rationale behind these
+> and a few decisions not covered here (CRD field placement, the
+> domain/transport boundary, error translation, and Fx wiring).
+
 **Patch-based cache merge.** Each CRD owns its own slice of a tenant's
 cached state — a `Policy` update never touches `TenantConfig` data, and
 vice versa. Implemented via `applyPatch` in `internal/kube/watcher.go`,
@@ -125,15 +130,19 @@ make sample-status    # patches Tenant.status.cloudResources (a separate
                       # touch it)
 ```
 
-This creates a sample tenant (`arasaka`) with placeholder — not real —
-identity pool/storage bucket values, so you have something to query
-immediately.
+> [!NOTE]
+> This creates a sample tenant (`arasaka`) with placeholder — not real —
+> identity pool/storage bucket values, so you have something to query
+> immediately.
 
 ### Run it
 
+> [!IMPORTANT]
+> `KUBE_CONFIG_PATH` is Muninn's own config variable, separate from
+> `kubectl`'s `$KUBECONFIG` — setting one does not set the other.
+
 ```bash
-export KUBE_CONFIG_PATH=~/.kube/config    # Muninn's own config var; separate
-                                          # from kubectl's $KUBECONFIG
+export KUBE_CONFIG_PATH=~/.kube/config
 make run
 ```
 
@@ -203,9 +212,6 @@ What's solid today: CRD watching, patch-based cache merge, the full gRPC
 Query/Describe API, Fx-based dependency wiring, and unit test coverage
 across every package. What's still ahead:
 
-- `pkg/client` — a Go client library for downstream consumers (layered
-  config merge, pluggable `Loader` interface, gRPC + static
-  implementations)
 - Integration tests against a real API server via
   [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)
   (`test/integration/envtest`), covering the informer registration/watch
@@ -213,8 +219,8 @@ across every package. What's still ahead:
   (`internal/kube/watcher_test.go` covers the pure patch/extraction logic
   underneath it)
 - Container image build (`Dockerfile` doesn't exist yet — `make
-  image`/`load` are placeholders) and a CI workflow
-- OpenTelemetry tracing (dependency is pinned, not yet wired up)
+  image`/`load` are placeholders)
+- OpenTelemetry tracing (not yet a dependency)
 
 ## License
 
