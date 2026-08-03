@@ -43,6 +43,42 @@ watcher stays ignorant of the other two.
 Covered directly in `internal/kube/watcher_test.go`
 (`TestApplyPatch_ResourceScopedMerge`).
 
+### Tenant deletion is the one exception
+
+Muninn never deletes Kubernetes objects itself — this is entirely about
+keeping the cache consistent after something else deletes a `Tenant`.
+
+`onTenantDelete` doesn't go through `applyPatch` at all — it calls
+`Cache.Delete` directly, removing the entry unconditionally, regardless of
+whether `TenantConfig`/`Policy` data for that tenant is still cached.
+
+This is deliberately asymmetric with `onTenantConfigDelete`/`onPolicyDelete`,
+which *do* go through `applyPatch` and only clear their own field. The
+difference is what each CRD's absence actually means: a `Tenant` can
+legitimately exist with no `TenantConfig`/`Policy` yet (a normal lifecycle
+state, not a problem), but `TenantConfig`/`Policy` outliving their `Tenant` is
+an orphan — Kubernetes has no `ownerReferences` cascade wired between these
+three independent CRDs, so a `TenantConfig` or `Policy` object can physically
+remain in the cluster after its `Tenant` is deleted. `Tenant` is the identity
+anchor (cluster-scoped: identity, phase, cloud resource refs); once it's
+gone, continuing to serve `Query` results assembled from those orphaned
+records would answer for a tenant that, identity-wise, no longer exists —
+worse than just returning `NotFound`.
+
+The `ownerReferences`-based fix (letting the Kubernetes garbage collector
+cascade-delete `TenantConfig`/`Policy` when their `Tenant` is deleted) is out
+of Muninn's control: Muninn only watches these CRDs, it doesn't create them.
+Provisioning — creating `Tenant`/`TenantConfig`/`Policy` objects and the cloud
+resources behind them — is a separate system's responsibility; Muninn is a
+read-only discovery service, never a write path. That's also why no owner
+reference exists between these three CRDs in the first place: setting one
+would be the provisioning system's job, not something a watcher can retrofit.
+
+Verified by `test/integration/envtest/watcher_test.go`'s
+`TestWatcherProjection`, which asserts that arasaka's orphaned
+`TenantConfig`/`Policy` don't prevent full removal once its `Tenant` is
+deleted.
+
 ## Readiness gating
 
 The gRPC health check stays `NOT_SERVING` until the informer cache completes

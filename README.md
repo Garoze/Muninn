@@ -110,6 +110,11 @@ exists here.
 - [`grpcurl`](https://github.com/fullstorydev/grpcurl) (optional — for
   hitting the API directly instead of through `muninnctl`; the server
   registers gRPC reflection, so no `.proto` files are needed client-side)
+- [`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest)
+  (only for `make test-integration`) —
+  `go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest`, then
+  `export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)`. Downloads a
+  throwaway `etcd`/`kube-apiserver` pair; doesn't touch your real cluster.
 
 ### Install the CRDs
 
@@ -187,9 +192,10 @@ call for `TENANT.runtime`.
 
 ```bash
 make test-unit            # go test ./... -short — no cluster required
-make test-integration     # go test ./... -tags=integration -run Integration
-                          # requires KUBECONFIG; currently no tests are
-                          # tagged `integration` yet (see Status)
+make test-integration     # runs test/integration/envtest against a local,
+                          # throwaway control plane (etcd + kube-apiserver) —
+                          # not your real cluster. Requires KUBEBUILDER_ASSETS;
+                          # see Prerequisites.
 make test                 # both
 ```
 
@@ -221,17 +227,18 @@ guarantee described above.
 This is an actively developed portfolio project, not a finished product.
 What's solid today: CRD watching, patch-based cache merge, the full gRPC
 Query/Describe API, `muninnctl` (a kubectl-style CLI for `query`/`describe`),
-Fx-based dependency wiring, and unit test coverage across every package.
-What's still ahead:
+a container image (multi-stage, distroless, verified end-to-end into a local
+k3s node), integration tests against a real API server via
+[`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)
+(`test/integration/envtest`, also wired into CI), Fx-based dependency wiring,
+and unit test coverage across every package. What's still ahead:
 
-- Integration tests against a real API server via
-  [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest)
-  (`test/integration/envtest`), covering the informer registration/watch
-  loop that today's unit tests deliberately don't reach
-  (`internal/kube/watcher_test.go` covers the pure patch/extraction logic
-  underneath it)
-- Container image build (`Dockerfile` doesn't exist yet — `make
-  image`/`load` are functional but have nothing to build without it)
+- `config/manager/` (Deployment) + `config/rbac/` (ServiceAccount,
+  ClusterRole/Role/RoleBinding) — actually deploying Muninn in-cluster under
+  least-privilege permissions, instead of only ever running via `make run`
+  against a developer's own full-admin kubeconfig
+- `test/e2e/` — a real k3s cluster test (not `envtest`) exercising the built
+  image once the above deployment manifests exist
 - OpenTelemetry tracing (not yet a dependency)
 
 ## License
