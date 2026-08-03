@@ -18,9 +18,9 @@
 
 Muninn watches Kubernetes CRDs, projects them into an in-memory cache keyed
 by tenant, and exposes that cache over a gRPC Query API. Downstream services
-ask Muninn "give me these keys for this tenant" instead of reading
-Kubernetes objects directly — Muninn is the only thing that needs to know
-what a `Tenant`, `TenantConfig`, or `Policy` object looks like.
+query Muninn for a set of keys scoped to a tenant instead of reading
+Kubernetes objects directly — Muninn is the only component that needs to
+know what a `Tenant`, `TenantConfig`, or `Policy` object looks like.
 
 ```mermaid
 flowchart LR
@@ -29,15 +29,15 @@ flowchart LR
     C --> G[gRPC Query API]
 ```
 
-## Why this exists
+## Motivation
 
 Most services in a multi-tenant platform need the same handful of
 per-tenant facts — display name, feature flags, provisioned cloud resource
-IDs, JWT validation rules — and none of them should be reading CRDs
-directly to get them. Muninn centralizes that: one service watches the
-CRDs, normalizes them into a stable key namespace, and serves that
-namespace over gRPC with a documented contract (`Describe`) and hard
-whitelisting (unknown keys are rejected, not silently ignored).
+IDs, JWT validation rules — and none of them should read CRDs directly to
+get them. Muninn centralizes that: one service watches the CRDs,
+normalizes them into a stable key namespace, and serves that namespace over
+gRPC with a documented contract (`Describe`) and hard whitelisting (unknown
+keys are rejected, not silently ignored).
 
 ## Architecture
 
@@ -49,77 +49,57 @@ Three CRDs, all under group `muninn.io`, namespace `tenant-<id>`:
 | `TenantConfig` | Namespaced | Arbitrary `map[string]string` runtime config                                         |
 | `Policy`       | Namespaced | JWT validation settings, subject/role → permission bindings                          |
 
-| Package                   | Role                                                             |
-|---------------------------|------------------------------------------------------------------|
-| `internal/kube`           | controller-runtime informers, patch-based cache sync             |
-| `internal/app`            | domain layer: `Cache`, `DiscoveryService.Query`, sentinel errors |
-| `internal/transport/grpc` | proto ↔ domain translation, gRPC handler                         |
-| `internal/observability`  | Prometheus metrics, health checks, gRPC server/listener          |
-| `internal/config`         | env-driven configuration                                         |
-| `api/v1alpha1`            | CRD Go types + generated deepcopy                                |
-| `gen/discovery/v1`        | generated gRPC/protobuf stubs                                    |
+| Package                   | Role                                                              |
+|---------------------------|--------------------------------------------------------------------|
+| `internal/kube`           | controller-runtime informers, patch-based cache sync              |
+| `internal/app`            | domain layer: `Cache`, `DiscoveryService.Query`, sentinel errors   |
+| `internal/transport/grpc` | proto ↔ domain translation, gRPC handler                          |
+| `internal/observability`  | Prometheus metrics, health checks, gRPC server/listener            |
+| `internal/config`         | env-driven configuration                                            |
+| `api/v1alpha1`            | CRD Go types + generated deepcopy                                  |
+| `gen/discovery/v1`        | generated gRPC/protobuf stubs                                       |
 
-`internal/app` has zero imports of `grpc`, `k8s.io/*`, or any generated
-proto type — the domain layer only ever sees Go primitives and its own
-structs. Both edges (`internal/kube` translating CRDs *in*, `internal/transport/grpc`
-translating requests *out*) do the translation work; the domain package
-stays ignorant of both.
+The domain layer is decoupled from both Kubernetes and gRPC specifics —
+each edge translates in its own direction, and the domain package itself
+has no knowledge of either. See [`docs/design.md`](docs/design.md) for
+why, and how that boundary is enforced.
 
-## Design decisions
+Three design principles underpin the implementation:
 
-> [!NOTE]
-> See [`docs/design.md`](docs/design.md) for the full rationale behind these
-> and a few decisions not covered here (CRD field placement, the
-> domain/transport boundary, error translation, and Fx wiring).
+- **Patch-based cache merge** — each CRD owns its own slice of a tenant's
+  cached state, so a `Policy` update never touches `TenantConfig` data.
+- **Readiness gating** — the gRPC health check stays `NOT_SERVING` until
+  the informer cache completes its initial list+watch cycle.
+- **Key whitelisting** — `Describe` exposes the full set of queryable
+  keys; anything outside it returns `InvalidArgument` rather than an
+  empty response.
 
-**Patch-based cache merge.** Each CRD owns its own slice of a tenant's
-cached state — a `Policy` update never touches `TenantConfig` data, and
-vice versa. Implemented via `applyPatch` in `internal/kube/watcher.go`,
-where each informer handler only sets the `tenantPatch` fields it's
-responsible for. Covered directly in `internal/kube/watcher_test.go`
-(`TestApplyPatch_ResourceScopedMerge`).
-
-**Readiness gating.** The gRPC health check stays `NOT_SERVING` until the
-informer cache completes its initial list+watch cycle, so a pod never
-serves traffic against an empty cache. Flipped via `MarkHealthServing`
-once `Watcher.Start` confirms sync.
-
-**Key whitelisting.** `internal/app.SupportedKeys` is the single source of
-truth for what's queryable. A key not in that map returns
-`InvalidArgument`, not an empty/silent response. `Describe` exposes the
-full list with type hints, so consumers can discover the contract instead
-of guessing at it.
-
-**No interface between the gRPC handler and the domain service.** The
-handler holds a concrete `*app.DiscoveryService`, not an interface. The
-domain service is cheap and deterministic (in-memory map, no I/O) —
-`internal/transport/grpc/handler_test.go` constructs a real one with
-seeded cache state rather than mocking it. An interface would earn its
-keep with a second implementation or an expensive dependency; neither
-exists here.
+See [`docs/design.md`](docs/design.md) for the rationale behind these and
+other design decisions.
 
 ## Getting started
 
 ### Prerequisites
 
 - Go 1.26+
+- `make`
 - A running Kubernetes cluster and `kubectl` pointed at it (developed
   against [k3s](https://k3s.io/); any cluster works)
 - [`controller-gen`](https://github.com/kubernetes-sigs/controller-tools)
   on `PATH` (`go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest`)
 - [`grpcurl`](https://github.com/fullstorydev/grpcurl) (optional — for
-  hitting the API directly instead of through `muninnctl`; the server
+  calling the API directly instead of through `muninnctl`; the server
   registers gRPC reflection, so no `.proto` files are needed client-side)
 - [`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest)
   (only for `make test-integration`) —
   `go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest`, then
   `export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)`. Downloads a
-  throwaway `etcd`/`kube-apiserver` pair; doesn't touch your real cluster.
+  throwaway `etcd`/`kube-apiserver` pair; doesn't touch the real cluster.
 
 ### Install the CRDs
 
 ```bash
-export KUBECONFIG=~/.kube/config   # or wherever your cluster's kubeconfig lives
+export KUBECONFIG=~/.kube/config   # or wherever the cluster's kubeconfig lives
 make install-crds
 ```
 
@@ -137,8 +117,8 @@ make sample-status    # patches Tenant.status.cloudResources (a separate
 
 > [!NOTE]
 > This creates a sample tenant (`arasaka`) with placeholder — not real —
-> identity pool/storage bucket values, so you have something to query
-> immediately.
+> identity pool/storage bucket values, so there is data to query without
+> further setup.
 
 ### Run it
 
@@ -157,8 +137,8 @@ or directly:
 KUBE_CONFIG_PATH=~/.kube/config go run ./cmd/muninn
 ```
 
-On success you'll see structured logs for cache sync (`"informers synced
-and watching"`) and the gRPC server binding `:5010` (configurable via
+On success, structured logs report cache sync (`"informers synced and
+watching"`) and the gRPC server binding `:5010` (configurable via
 `GRPC_SERVICE_ADDR`).
 
 ### Query it
@@ -171,7 +151,7 @@ make describe
 make query TENANT=arasaka KEYS=TENANT.id,TENANT.displayName,TENANT.resources.identityPoolID
 ```
 
-Or hit the API directly with `grpcurl`, since the server registers gRPC
+Or call the API directly with `grpcurl`, since the server registers gRPC
 reflection:
 
 ```bash
@@ -188,12 +168,11 @@ Live cluster changes are reflected without restarting the process — try
 '{"spec":{"runtimeConfig":{"NEW_KEY":"value"}}}'` and re-run the `Query`
 call for `TENANT.runtime`.
 
-### Deploy it in-cluster
+## Deployment
 
-`make run` above runs Muninn on your host, against whatever `$KUBECONFIG`
-you have — convenient for development, but not how it'd actually run in
-production. `make deploy` runs it as a Pod, under its own least-privilege
-`ServiceAccount`, instead:
+`make run` runs Muninn on the host, against whatever `$KUBECONFIG` is
+configured — suited to development, not production. `make deploy` runs it
+as a Pod instead, under its own least-privilege `ServiceAccount`:
 
 ```bash
 make image      # build the image
@@ -207,14 +186,15 @@ kubectl port-forward -n muninn-system deploy/muninn 5010:5010 &
 make query TENANT=arasaka KEYS=TENANT.id
 ```
 
-`make undeploy` tears it back down.
+`make undeploy` tears it back down. See [`docs/design.md`](docs/design.md)
+for the RBAC and deployment rationale.
 
-### View traces
+## Observability
 
 Muninn exports an OpenTelemetry span for every gRPC call over OTLP to
 `$OTEL_EXPORTER_OTLP_ENDPOINT` (default `localhost:4317`). Nothing needs to
-be listening there for Muninn to run — spans just fail to export silently if
-it's unset or unreachable. To actually see them, run
+be listening there for Muninn to run — spans fail to export silently if
+the endpoint is unset or unreachable. To see them, run
 [Jaeger](https://www.jaegertracing.io/)'s all-in-one image, which bundles
 the collector, storage, and UI in one container:
 
@@ -225,13 +205,16 @@ podman run -d --name jaeger \
 # (or `docker run` in place of `podman run` — same image, same flags)
 ```
 
-Then run Muninn pointed at it and make a call:
+Then run Muninn pointed at it and issue a query:
+
+> [!IMPORTANT]
+> The default sample ratio is `0.1`, so a single manual query has only a
+> 10% chance of being recorded. Set `OTEL_TRACES_SAMPLE_ARG=1` to sample
+> every call for this walkthrough — otherwise Jaeger may show nothing.
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
-export OTEL_TRACES_SAMPLE_ARG=1   # sample everything for this demo — the
-                                  # default 0.1 means a single manual query
-                                  # has only a 10% chance of being recorded
+export OTEL_TRACES_SAMPLE_ARG=1
 make run
 ```
 
@@ -248,24 +231,22 @@ trace for that `Query` call.
 make test-unit             # go test ./... -short — no cluster required
 make test-integration      # runs test/integration/envtest against a local,
                            # throwaway control plane (etcd + kube-apiserver) —
-                           # not your real cluster. Requires KUBEBUILDER_ASSETS;
+                           # not the real cluster. Requires KUBEBUILDER_ASSETS;
                            # see Prerequisites.
+
 make test                  # both
 
-make test-e2e              # deploys against your real cluster via `make
+make test-e2e              # deploys against the real cluster via `make
                            # deploy`, exercises it over gRPC, tears down via
                            # `make undeploy`. Requires the image already
                            # built and loaded (`make image load`). Not part
                            # of `make test` or CI — see docs/design.md.
 ```
 
-Unit coverage spans the domain layer (`internal/app`), the gRPC↔domain
-translation boundary (`internal/transport/grpc`), the patch-merge/CRD
-extraction logic (`internal/kube`), observability wiring
-(`internal/observability`), and config parsing (`internal/config`) —
-positive and negative cases for error precedence, label cardinality on
-every Prometheus metric, nil-safety, and the resource-scoped merge
-guarantee described above.
+Unit tests cover the domain layer, the gRPC translation boundary, the
+Kubernetes watch-and-patch logic, observability wiring, and configuration
+parsing — including negative-path and edge-case coverage alongside the
+happy path, not only the resource-scoped merge guarantee described above.
 
 ## Makefile reference
 
@@ -276,7 +257,7 @@ guarantee described above.
 | `make sample` / `make sample-status`           | Apply sample fixtures / patch sample status                               |
 | `make run`                                     | Run the server locally against `$KUBECONFIG`                              |
 | `make test` / `test-unit` / `test-integration` | Run tests                                                                 |
-| `make test-e2e`                                | Deploy + exercise + tear down against your real cluster (not part of `make test`) |
+| `make test-e2e`                                | Deploy + exercise + tear down against the real cluster (not part of `make test`) |
 | `make query TENANT=<id> KEYS=<a,b,c>`          | Query keys for a tenant via `muninnctl`                                   |
 | `make describe`                                | List supported configuration keys via `muninnctl`                         |
 | `make fmt` / `vet` / `lint` / `tidy`           | Standard Go hygiene                                                       |
@@ -285,10 +266,21 @@ guarantee described above.
 | `make image` / `load`                          | Build the container image / import it into k3s's containerd store        |
 | `make deploy` / `undeploy`                     | Apply / tear down Muninn in-cluster under its own ServiceAccount          |
 
+## Documentation
+
+[`docs/design.md`](docs/design.md) covers the full rationale behind every
+design decision referenced above: CRD field placement, the domain/transport
+boundary, error translation, Fx wiring, in-cluster RBAC, the end-to-end
+test, and OpenTelemetry tracing.
+
+[`docs/adr/`](docs/adr/) records the decisions with the most significant
+tradeoffs as standalone Architecture Decision Records.
+
 ## Status
 
-This is an actively developed portfolio project. Everything originally
-scoped is done:
+Muninn is a portfolio project, not deployed in production. Its design
+reflects patterns used in a production multi-tenant platform.
+Feature-complete for its current scope:
 
 - CRD watching, patch-based cache merge across `Tenant`/`TenantConfig`/`Policy`
 - The full gRPC Query/Describe API
@@ -300,7 +292,7 @@ scoped is done:
 - OpenTelemetry tracing on every gRPC call, `ParentBased` sampling, with a Jaeger walkthrough for viewing it (see `docs/design.md`)
 - Fx-based dependency wiring and unit test coverage across every package
 
-Further additions would be new scope, not a backlog being worked through.
+No further scope is currently planned.
 
 ## License
 
