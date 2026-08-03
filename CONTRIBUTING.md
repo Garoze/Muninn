@@ -1,7 +1,9 @@
 # Contributing to Muninn
 
-Thanks for your interest in contributing. By participating in this
-project you agree to abide by its [Code of Conduct](./CODE_OF_CONDUCT.md).
+Muninn is a single-maintainer portfolio/reference project. Issues and
+pull requests are welcome regardless — this guide documents the same
+workflow the maintainer follows. By participating, you agree to abide by
+the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ## Getting started
 
@@ -43,9 +45,18 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/):
 `type(scope): description`
 
 - Types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`
-- Scopes: `api`, `app`, `kube`, `transport`, `client`, `config`, `ci`, `deps`
+- Scopes: `api`, `app`, `kube`, `transport`, `config`, `ci`, `deps`
 
 ## Pull requests
 
 Keep PRs small and focused on one change. If a change naturally splits
 into independent concerns, open separate PRs rather than bundling them.
+
+## Documenting a decision
+
+If a change makes a real architectural tradeoff — a genuine alternative
+was rejected, not only "the obvious way to do it" — record it in
+[`docs/design.md`](docs/design.md). If it's the kind of decision likely
+to be questioned in review or revisited later, add a standalone entry
+under [`docs/adr/`](docs/adr/) as well, following the existing records'
+Context/Decision/Alternatives/Consequences shape.

@@ -1,5 +1,10 @@
 # Contributor Covenant Code of Conduct
 
+> Muninn currently has a single maintainer. This Code of Conduct is
+> adopted proactively, to set clear expectations for anyone who
+> contributes, rather than reflecting an existing multi-person community
+> or enforcement history.
+
 ## Our Pledge
 
 We as members, contributors, and leaders pledge to make participation in

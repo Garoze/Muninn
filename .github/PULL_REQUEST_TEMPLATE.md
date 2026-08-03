@@ -1,4 +1,4 @@
-<!-- Reference: README.md "Design decisions", CONTRIBUTING.md -->
+<!-- Reference: README.md "Architecture", docs/design.md, docs/adr/, CONTRIBUTING.md -->
 
 ## Description
 
