@@ -89,9 +89,13 @@ test-e2e:
 image:
 	$(CONTAINER_ENGINE) build -t $(IMG) .
 
-# import the built image into the local k3s node's containerd store
+# import the built image into the local k3s node's containerd store. Tag
+# with an explicit localhost/ prefix first so config/manager/deployment.yaml's
+# image reference matches regardless of which engine built it — Podman
+# applies this prefix to local images automatically, Docker does not.
 load:
-	$(CONTAINER_ENGINE) save $(IMG) | sudo k3s ctr images import -
+	$(CONTAINER_ENGINE) tag $(IMG) localhost/$(IMG)
+	$(CONTAINER_ENGINE) save localhost/$(IMG) | sudo k3s ctr images import -
 
 # generate CRD manifests and apply them to the cluster in $KUBECONFIG
 install-crds:
