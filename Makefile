@@ -4,6 +4,7 @@ BIN_DIR     := bin
 SAMPLES_DIR := config/samples
 MANAGER_DIR := config/manager
 RBAC_DIR    := config/rbac
+WEBHOOK_DIR := config/webhook
 PROTO_DIR   := proto
 PROTO_SRC   := $(PROTO_DIR)/v1
 GEN_DIR     := gen
@@ -20,7 +21,8 @@ MANAGER_BIN ?= muninn
 QUERY_BIN   ?= muninnctl
 
 .PHONY: test test-unit test-integration test-e2e build image load lint \
-	fmt vet tidy proto sample run query describe deploy undeploy clean
+	fmt vet tidy proto sample run query describe deploy undeploy \
+	deploy-webhook undeploy-webhook clean
 
 # regenerate Go code (message types + gRPC stubs) from proto/v1/*.proto
 # requires: protoc, protoc-gen-go, protoc-gen-go-grpc on $PATH
@@ -134,6 +136,33 @@ undeploy:
 	kubectl delete -f $(RBAC_DIR)/role.yaml --ignore-not-found
 	kubectl delete -f $(RBAC_DIR)/service_account.yaml --ignore-not-found
 	kubectl delete -f $(MANAGER_DIR)/namespace.yaml --ignore-not-found
+
+# deploy the mutating admission webhook. Requires cert-manager already
+# installed on the cluster (external prerequisite, not managed by this repo)
+# and `make deploy` already applied (needs the muninn-system namespace and
+# the gRPC Service the injected init container/sidecar dial). Applied in
+# dependency order: Issuer/Certificate first so cert-manager has time to
+# issue the Secret the Deployment mounts, then the ServiceAccount/Service/
+# Deployment, then the MutatingWebhookConfiguration last so the API server
+# doesn't start routing admission requests before the backend exists.
+deploy-webhook:
+	kubectl apply -f $(WEBHOOK_DIR)/issuer.yaml
+	kubectl apply -f $(WEBHOOK_DIR)/certificate.yaml
+	kubectl apply -f $(WEBHOOK_DIR)/service_account.yaml
+	kubectl apply -f $(WEBHOOK_DIR)/service.yaml
+	kubectl apply -f $(WEBHOOK_DIR)/deployment.yaml
+	kubectl apply -f $(WEBHOOK_DIR)/webhook.yaml
+
+# tear down everything `make deploy-webhook` created (reverse order; the
+# MutatingWebhookConfiguration goes first so the API server stops routing
+# admission requests here before the backend disappears)
+undeploy-webhook:
+	kubectl delete -f $(WEBHOOK_DIR)/webhook.yaml --ignore-not-found
+	kubectl delete -f $(WEBHOOK_DIR)/deployment.yaml --ignore-not-found
+	kubectl delete -f $(WEBHOOK_DIR)/service.yaml --ignore-not-found
+	kubectl delete -f $(WEBHOOK_DIR)/service_account.yaml --ignore-not-found
+	kubectl delete -f $(WEBHOOK_DIR)/certificate.yaml --ignore-not-found
+	kubectl delete -f $(WEBHOOK_DIR)/issuer.yaml --ignore-not-found
 
 clean:
 	rm -rf $(BIN_DIR)
