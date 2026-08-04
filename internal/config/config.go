@@ -33,8 +33,8 @@ type Config struct {
 	// ConfigMapLabelSelector scopes which ConfigMaps the watcher watches.
 	ConfigMapLabelSelector string
 
-	// CacheEntryTTL controls staleness enforcement for tenant cache entries.
-	// Zero disables stale-entry rejection.
+	// CacheEntryTTL controls staleness enforcement for cached namespace
+	// entries. Zero disables stale-entry rejection.
 	CacheEntryTTL time.Duration
 
 	// StartupTimeout is how long the Fx application is given to complete its

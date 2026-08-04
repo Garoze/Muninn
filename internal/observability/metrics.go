@@ -17,7 +17,7 @@ type Metrics struct {
 	// QueryDuration observes query latency in seconds.
 	QueryDuration *prometheus.HistogramVec
 
-	// CacheEntries is the current number of tenants in the cache.
+	// CacheEntries is the current number of namespaces in the cache.
 	CacheEntries prometheus.Gauge
 
 	// CacheSynced is 1 when the informer cache has completed initial sync.
@@ -68,7 +68,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		CacheEntries: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: "discovery",
 			Name:      "cache_entries",
-			Help:      "Number of tenants currently cached.",
+			Help:      "Number of namespaces currently cached.",
 		}),
 
 		CacheSynced: prometheus.NewGauge(prometheus.GaugeOpts{
