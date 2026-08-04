@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -67,6 +68,13 @@ type Config struct {
 	// anchor on that Deployment's own image field rather than a hand-copied
 	// value, so the two can't drift out of sync.
 	InjectImage string
+
+	// EnabledConfigSources restricts which registered ConfigSource kinds
+	// (matched against each source's Kind()) actually run, by name.
+	// Empty (the default) means every registered source is enabled - this
+	// only narrows the set already registered in code, it can't enable a
+	// source that isn't registered.
+	EnabledConfigSources []string
 }
 
 // New returns a Config populated from enviroment variables.
@@ -86,6 +94,7 @@ func New() *Config {
 		WebhookTLSKeyPath:      envOrDefault("WEBHOOK_TLS_KEY_PATH", "/etc/webhook/certs/tls.key"),
 		SelfAddr:               envOrDefault("MUNINN_SELF_ADDR", "muninn.muninn-system.svc.cluster.local:5010"),
 		InjectImage:            envOrDefault("MUNINN_INJECT_IMAGE", ""),
+		EnabledConfigSources:   envCSV("ENABLED_CONFIG_SOURCES"),
 	}
 }
 
@@ -106,6 +115,25 @@ func envFloat64(key string, fallback float64) float64 {
 		return fallback
 	}
 	return f
+}
+
+// envCSV splits a comma-separated env var into trimmed, non-empty entries.
+// Returns nil (not an empty, non-nil slice) when the var is unset or empty,
+// so callers can use len(...) == 0 to mean "no filter" unambiguously.
+func envCSV(key string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {
