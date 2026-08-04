@@ -172,8 +172,8 @@ func writeFileAtomic(path string, data []byte) error {
 	tmpPath := tmp.Name()
 
 	// Close/Remove errors on these cleanup paths are deliberately discarded:
-	// we're already returning the more relevant error from the write/close/
-	// rename attempt that triggered the cleanup.
+	// the write/close/rename attempt that triggered the cleanup already
+	// returns the more relevant error.
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpPath)
