@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runtime-config
+  namespace: arasaka
+  labels:
+    muninn.io/config: "runtime"
+data:
+  LOG_LEVEL: "info"
+  FEATURE_DARKMODE: "true"

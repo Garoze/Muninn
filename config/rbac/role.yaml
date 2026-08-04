@@ -3,10 +3,6 @@ kind: ClusterRole
 metadata:
   name: muninn-manager
 rules:
-  - apiGroups: ["muninn.io"]
-    resources: ["tenants"]
-    verbs: ["get", "list", "watch"]
-
-  - apiGroups: ["muninn.io"]
-    resources: ["tenantconfigs", "policies"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
     verbs: ["get", "list", "watch"]
