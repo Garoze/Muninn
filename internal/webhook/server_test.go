@@ -14,7 +14,7 @@ func TestNewServer_BadCertPathErrors(t *testing.T) {
 		WebhookTLSCertPath: "/nonexistent/tls.crt",
 		WebhookTLSKeyPath:  "/nonexistent/tls.key",
 	}
-	h := NewHandler(zap.NewNop())
+	h := NewHandler(zap.NewNop(), cfg)
 
 	_, err := NewServer(cfg, h, zap.NewNop())
 	if err == nil {
@@ -30,7 +30,7 @@ func TestNewServer_ValidCert_ConfiguresServer(t *testing.T) {
 		WebhookTLSCertPath: certPath,
 		WebhookTLSKeyPath:  keyPath,
 	}
-	h := NewHandler(zap.NewNop())
+	h := NewHandler(zap.NewNop(), cfg)
 
 	srv, err := NewServer(cfg, h, zap.NewNop())
 	if err != nil {
