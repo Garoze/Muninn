@@ -12,8 +12,7 @@ import (
 	"github.com/spf13/pflag"
 
 	discoveryv1 "github.com/garoze/muninn/gen/discovery/v1"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"github.com/garoze/muninn/internal/discoveryclient"
 )
 
 const defaultAddr = "localhost:5010"
@@ -91,7 +90,7 @@ func cmdQuery(args []string) error {
 		return fmt.Errorf("--namespace and --keys are required (see 'muninnctl query -h')")
 	}
 
-	conn, err := dial(*addr)
+	client, conn, err := discoveryclient.Dial(*addr)
 	if err != nil {
 		return err
 	}
@@ -104,7 +103,7 @@ func cmdQuery(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resp, err := discoveryv1.NewDiscoveryServiceClient(conn).Query(ctx, &discoveryv1.QueryRequest{
+	resp, err := client.Query(ctx, &discoveryv1.QueryRequest{
 		Namespace: *namespace,
 		Keys:      strings.Split(*keys, ","),
 		Strict:    *strict,
@@ -125,7 +124,7 @@ func cmdDescribe(args []string) error {
 		return err
 	}
 
-	conn, err := dial(*addr)
+	client, conn, err := discoveryclient.Dial(*addr)
 	if err != nil {
 		return err
 	}
@@ -138,26 +137,12 @@ func cmdDescribe(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resp, err := discoveryv1.NewDiscoveryServiceClient(conn).Describe(ctx, &discoveryv1.DescribeRequest{})
+	resp, err := client.Describe(ctx, &discoveryv1.DescribeRequest{})
 	if err != nil {
 		return err
 	}
 
 	return formatDescribeResponse(os.Stdout, resp)
-}
-
-// dial opens a plain-text gRPC connection to addr.
-// insecure.NewCredentials() is intentional: muninnctl is a dev/ops tool
-// for use inside a cluster or over a local port-forward. TLS is expected
-// to be terminated at the ingress or service-mesh layer. mTLS support is
-// out of scope for this tool.
-func dial(addr string) (*grpc.ClientConn, error) {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", addr, err)
-	}
-
-	return conn, nil
 }
 
 // formatQueryResponse writes query results as tab-aligned columns to w.
