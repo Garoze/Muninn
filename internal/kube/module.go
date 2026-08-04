@@ -18,11 +18,20 @@ import (
 var Module = fx.Options(
 	fx.Provide(newRestConfig),
 	fx.Provide(NewScheme),
-	// ConfigMapSource is registered into the "config_sources" value group -
-	// a bring-your-own-CRD source becomes an additional fx.Provide into the
-	// same group, with no change to NewWatcher or anything downstream of it.
+	// ConfigMapSource and SecretSource are both registered into the
+	// "config_sources" value group - a bring-your-own-CRD source becomes
+	// an additional fx.Provide into the same group, with no change to
+	// NewWatcher or anything downstream of it. SecretSource is the proof:
+	// a second, real ConfigSource implementation running concurrently with
+	// ConfigMapSource, disambiguated in the merged cache purely by Kind().
 	fx.Provide(
 		fx.Annotate(NewConfigMapSource,
+			fx.As(new(ConfigSource)),
+			fx.ResultTags(`group:"config_sources"`),
+		),
+	),
+	fx.Provide(
+		fx.Annotate(NewSecretSource,
 			fx.As(new(ConfigSource)),
 			fx.ResultTags(`group:"config_sources"`),
 		),

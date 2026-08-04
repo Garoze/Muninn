@@ -93,10 +93,11 @@ load:
 	$(CONTAINER_ENGINE) tag $(IMG) localhost/$(IMG)
 	$(CONTAINER_ENGINE) save localhost/$(IMG) | sudo k3s ctr images import -
 
-# apply the sample Namespace and ConfigMap to the cluster
+# apply the sample Namespace, ConfigMap, and Secret to the cluster
 sample:
 	kubectl apply -f $(SAMPLES_DIR)/namespace.yaml
 	kubectl apply -f $(SAMPLES_DIR)/configmap.yaml
+	kubectl apply -f $(SAMPLES_DIR)/secret.yaml
 
 # run the server locally against the cluster in $KUBECONFIG
 run:

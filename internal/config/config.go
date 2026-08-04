@@ -33,6 +33,9 @@ type Config struct {
 	// ConfigMapLabelSelector scopes which ConfigMaps the watcher watches.
 	ConfigMapLabelSelector string
 
+	// SecretLabelSelector scopes which Secrets the watcher watches.
+	SecretLabelSelector string
+
 	// CacheEntryTTL controls staleness enforcement for cached namespace
 	// entries. Zero disables stale-entry rejection.
 	CacheEntryTTL time.Duration
@@ -87,6 +90,7 @@ func New() *Config {
 		TraceSampleRatio:       envFloat64("OTEL_TRACES_SAMPLE_ARG", 0.1),
 		KubeConfigPath:         os.Getenv("KUBE_CONFIG_PATH"),
 		ConfigMapLabelSelector: envOrDefault("CONFIGMAP_LABEL_SELECTOR", "muninn.io/config=runtime"),
+		SecretLabelSelector:    envOrDefault("SECRET_LABEL_SELECTOR", "muninn.io/config=secret"),
 		CacheEntryTTL:          envDuration("CACHE_ENTRY_TTL", 0),
 		StartupTimeout:         envDuration("STARTUP_TIMEOUT", 2*time.Minute),
 		WebhookAddr:            envOrDefault("WEBHOOK_ADDR", ":8443"),

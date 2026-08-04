@@ -4,5 +4,5 @@ metadata:
   name: muninn-manager
 rules:
   - apiGroups: [""]
-    resources: ["configmaps"]
+    resources: ["configmaps", "secrets"]
     verbs: ["get", "list", "watch"]

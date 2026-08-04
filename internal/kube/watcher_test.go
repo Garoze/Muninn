@@ -309,6 +309,47 @@ func TestOnSourceUpsert_DifferentKindsDoNotCollide(t *testing.T) {
 	}
 }
 
+// TestOnSourceUpsert_ConfigMapAndSecretDoNotCollide is
+// TestOnSourceUpsert_DifferentKindsDoNotCollide's real-implementation
+// counterpart: ConfigMapSource and SecretSource, the two actual registered
+// ConfigSources (see internal/kube/module.go), watching a ConfigMap and a
+// Secret that share the same object name in the same namespace. Proves the
+// two real sources run concurrently without clobbering each other's slice
+// of the merged cache entry, disambiguated purely by Kind() via sourceKey.
+func TestOnSourceUpsert_ConfigMapAndSecretDoNotCollide(t *testing.T) {
+	w := newTestWatcher(t)
+	cmSource := NewConfigMapSource(&config.Config{})
+	secretSource := NewSecretSource(&config.Config{})
+
+	w.onSourceUpsert(cmSource)(&corev1.ConfigMap{
+		ObjectMeta: objectMeta("ns1", "app-config", "1"),
+		Data:       map[string]string{"LOG_LEVEL": "info"},
+	})
+	w.onSourceUpsert(secretSource)(&corev1.Secret{
+		ObjectMeta: objectMeta("ns1", "app-config", "1"),
+		Data:       map[string][]byte{"API_TOKEN": []byte("sekret")},
+	})
+
+	entry := w.appCache.Get("ns1")
+	if entry == nil {
+		t.Fatal("expected namespace to be cached")
+	}
+	if entry.Sources["ConfigMap/app-config"]["LOG_LEVEL"] != "info" {
+		t.Errorf("ConfigMap source missing or clobbered: got %+v", entry.Sources)
+	}
+	if entry.Sources["Secret/app-config"]["API_TOKEN"] != "sekret" {
+		t.Errorf("Secret source missing or clobbered: got %+v", entry.Sources)
+	}
+	if len(entry.Sources) != 2 {
+		t.Errorf("expected 2 distinct source keys, got %d: %+v", len(entry.Sources), entry.Sources)
+	}
+
+	merged := entry.Merged()
+	if merged["LOG_LEVEL"] != "info" || merged["API_TOKEN"] != "sekret" {
+		t.Errorf("expected merged view to contain both sources' keys, got %+v", merged)
+	}
+}
+
 func objectMeta(namespace, name, resourceVersion string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{Namespace: namespace, Name: name, ResourceVersion: resourceVersion}
 }

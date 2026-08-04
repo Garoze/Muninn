@@ -78,3 +78,48 @@ func toAnyMap(m map[string]string) map[string]any {
 
 	return out
 }
+
+// SecretSource watches corev1.Secret, scoped by a label selector, and
+// extracts its Data as the config slice. A second, bring-your-own-style
+// ConfigSource implementation alongside ConfigMapSource, proving the
+// interface generalizes beyond the reference type: a different Kubernetes
+// kind, a different label selector, and (unlike ConfigMapSource) a decode
+// step, since corev1.Secret.Data is raw bytes rather than strings.
+//
+// A Secret and a ConfigMap can legitimately share the same name in the same
+// namespace (e.g. both named "app-config") without colliding in the merged
+// cache, because sourceKey prefixes each contributed slice with Kind() -
+// "ConfigMap/app-config" and "Secret/app-config" are distinct
+// ConfigEntry.Sources keys even though the underlying object names match.
+type SecretSource struct {
+	labelSelector string
+}
+
+// NewSecretSource creates a SecretSource scoped to cfg.SecretLabelSelector.
+func NewSecretSource(cfg *config.Config) *SecretSource {
+	return &SecretSource{labelSelector: cfg.SecretLabelSelector}
+}
+
+func (s *SecretSource) Kind() string { return "Secret" }
+
+func (s *SecretSource) Watch() client.Object { return &corev1.Secret{} }
+
+func (s *SecretSource) List() client.ObjectList { return &corev1.SecretList{} }
+
+func (s *SecretSource) LabelSelector() string { return s.labelSelector }
+
+func (s *SecretSource) Scope() string { return "namespace" }
+
+func (s *SecretSource) Extract(obj client.Object) map[string]any {
+	sec, ok := obj.(*corev1.Secret)
+	if !ok || sec == nil || sec.Data == nil {
+		return nil
+	}
+
+	out := make(map[string]any, len(sec.Data))
+	for k, v := range sec.Data {
+		out[k] = string(v)
+	}
+
+	return out
+}
