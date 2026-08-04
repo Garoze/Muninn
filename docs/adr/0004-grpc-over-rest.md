@@ -1,4 +1,4 @@
-# ADR-0006: gRPC over REST as the transport protocol
+# ADR-0004: gRPC over REST as the transport protocol
 
 **Status:** Accepted
 

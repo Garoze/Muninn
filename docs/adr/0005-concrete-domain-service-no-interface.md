@@ -1,4 +1,4 @@
-# ADR-0007: Concrete domain service dependency instead of a handler-defined interface
+# ADR-0005: Concrete domain service dependency instead of a handler-defined interface
 
 **Status:** Accepted
 
