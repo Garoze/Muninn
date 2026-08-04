@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/garoze/muninn/internal/config"
@@ -33,16 +34,21 @@ func ShouldInject(pod *corev1.Pod) bool {
 }
 
 // BuildPath return the JSON Path operations needed to inject th shared
-// volume, init container, and sidecar into pod - or nil if they're already
+// volume, init container, and sidecar into pod, and to mount that volume
+// into every container the Pod already had - or nil if they're already
 // present. namespace somes from the AdmissionRequest, not pod.Namespace:
 // the request's namespace field is uthoritative at admission time,
 // independent of whether the submitted object's own metadata.namespace was
 // populated by the client.
 //
+// The existing-container mount is what makes this a zero-client-code
+// integration: without it, a consumer would still need to know Muninn's
+// internal volume name/mount path to read the resolved config themselves.
+//
 // Idempotent by construction: each piece is checked for existence by name
 // before being added, so a webhook re-invoked for the same admission
 // request (the API server can do this) produces the same result, not a
-// duplicate volume/container.
+// duplicate volume/container/mount.
 func BuildPath(pod *corev1.Pod, namespace string, cfg *config.Config) []patchOperation {
 	var ops []patchOperation
 
@@ -65,7 +71,53 @@ func BuildPath(pod *corev1.Pod, namespace string, cfg *config.Config) []patchOpe
 		)))
 	}
 
+	ops = append(ops, addAppVolumeMountOps(pod)...)
+
 	return ops
+}
+
+// addAppVolumeMountOps mounts the shared volume into every container the
+// Pod already had at admission time (not the sidecar being injected in
+// this same call - that one mounts itself in buildResolveContainer), so
+// the application itself can read the resolved config file without any
+// change to its own manifest beyond the opt-in annotation.
+func addAppVolumeMountOps(pod *corev1.Pod) []patchOperation {
+	var ops []patchOperation
+
+	mount := corev1.VolumeMount{Name: volumeName, MountPath: mountPath}
+
+	for i, c := range pod.Spec.Containers {
+		if hasVolumeMount(c, volumeName) {
+			continue
+		}
+
+		if len(c.VolumeMounts) == 0 {
+			ops = append(ops, patchOperation{
+				Op:    "add",
+				Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+				Value: []corev1.VolumeMount{mount},
+			})
+			continue
+		}
+
+		ops = append(ops, patchOperation{
+			Op:    "add",
+			Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i),
+			Value: mount,
+		})
+	}
+
+	return ops
+}
+
+func hasVolumeMount(c corev1.Container, name string) bool {
+	for _, vm := range c.VolumeMounts {
+		if vm.Name == name {
+			return true
+		}
+	}
+
+	return false
 }
 
 // buildResolveContainer builds the init container (watch=false, runs once
