@@ -50,6 +50,13 @@ type Config struct {
 	// WebhookTLSKeyPath is the path to the TLS private key paired with
 	// WebhookTLSCertPath.
 	WebhookTLSKeyPath string
+
+	// SelfAddr is the in-cluster address consumers of Muninn's own gRPC API
+	// should dial - specifically, what the webhook stamps into the --addr
+	// flag of the init container/sidecar it injects into consumer Pods, since
+	// those run outside Muninn's own Pod and need a stable address rather than
+	// a Pod IP or port-forward.
+	SelfAddr string
 }
 
 // New returns a Config populated from enviroment variables.
@@ -67,6 +74,7 @@ func New() *Config {
 		WebhookAddr:            envOrDefault("WEBHOOK_ADDR", ":8443"),
 		WebhookTLSCertPath:     envOrDefault("WEBHOOK_TLS_CERT_PATH", "/etc/webhook/certs/tls.crt"),
 		WebhookTLSKeyPath:      envOrDefault("WEBHOOK_TLS_KEY_PATH", "/etc/webhook/certs/tls.key"),
+		SelfAddr:               envOrDefault("MUNINN_SELF_ADDR", "muninn.muninn-system.svc.cluster.local:5010"),
 	}
 }
 
