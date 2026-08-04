@@ -211,3 +211,55 @@ func (s *DiscoveryService) Query(ctx context.Context, namespace string, keys []s
 
 	return results, missing, entry.Revision, nil
 }
+
+// Resolve returns every key currently resolved for a namespace, without
+// requiring the caller to enumerate keys up front. Backs the mutating
+// admission webhook's init container/sidecar - Query stays keys-in/keys-out
+// for callers that already know what they want.
+//
+// Error Precedence: same as Query, minus the strict/missing-keys case
+// there's nothing to be missing, Resolve returns whatever the namespace
+// currently has.
+func (s *DiscoveryService) Resolve(ctx context.Context, namespace string) ([]QueryResult, string, error) {
+	if !s.Cache.IsSynced() {
+		return nil, "", fmt.Errorf("%w", ErrCacheNotSynced)
+	}
+
+	if namespace == "" {
+		return nil, "", fmt.Errorf("%w", ErrNamespaceRequired)
+	}
+
+	entry := s.Cache.Get(namespace)
+	if entry == nil {
+		return nil, "", fmt.Errorf("%w: %s", ErrNamespaceNotFound, namespace)
+	}
+
+	if s.cacheEntryTTL > 0 && !entry.UpdatedAt.IsZero() {
+		if s.now().Sub(entry.UpdatedAt) > s.cacheEntryTTL {
+			return nil, "", fmt.Errorf("%w: %s", ErrCacheEntryStale, namespace)
+		}
+	}
+
+	results := make([]QueryResult, 0)
+	index := make(map[string]int) // key -> index into results, so later source can overwrite in place
+
+	for _, name := range sortedSourceNames(entry.Sources) {
+		for k, v := range entry.Sources[name] {
+			if i, ok := index[k]; ok {
+				results[i] = QueryResult{Key: k, Value: v, Source: name}
+				continue
+			}
+			index[k] = len(results)
+			results = append(results, QueryResult{Key: k, Value: v, Source: name})
+		}
+	}
+
+	sort.Slice(results, func(i, j int) bool { return results[i].Key < results[j].Key })
+
+	s.log.Debug("resolve completed",
+		zap.String("namespace", namespace),
+		zap.Int("keys_resolved", len(results)),
+	)
+
+	return results, entry.Revision, nil
+}
