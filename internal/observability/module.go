@@ -21,7 +21,7 @@ var Module = fx.Options(
 	fx.Provide(NewStandaloneHealth),
 	fx.Provide(NewTracerProvider),
 	fx.Invoke(startMetricsServer),
-	fx.Invoke(shutdownTracerProvider),
+	fx.Invoke(ShutdownTracerProvider),
 )
 
 // NewLogger constructs the shared production zap.Logger, used by every
@@ -57,7 +57,10 @@ func startMetricsServer(lc fx.Lifecycle, cfg *config.Config, log *zap.Logger) {
 	})
 }
 
-func shutdownTracerProvider(lc fx.Lifecycle, tp *sdktrace.TracerProvider) {
+// ShutdownTracerProvider registers an OnStop hook that shuts tp down,
+// so both serve (via Module) and webhook (called directly, to avoid
+// pulling in the pieces webhook mode doesn't need) release it the same way.
+func ShutdownTracerProvider(lc fx.Lifecycle, tp *sdktrace.TracerProvider) {
 	lc.Append(fx.Hook{
 		OnStop: func(ctx context.Context) error {
 			return tp.Shutdown(ctx)
