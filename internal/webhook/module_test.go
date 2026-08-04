@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxtest"
@@ -25,6 +26,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 
 	"github.com/garoze/muninn/internal/config"
+	"github.com/garoze/muninn/internal/observability"
 )
 
 // TestModule_StartsAndServesRealHTTPS builds the real Fx Module - the same
@@ -47,6 +49,7 @@ func TestModule_StartsAndServesRealHTTPS(t *testing.T) {
 		fx.Provide(func() *config.Config { return cfg }),
 		fx.Provide(zap.NewNop),
 		fx.Provide(sdktrace.NewTracerProvider),
+		fx.Provide(func() *observability.Metrics { return observability.NewMetrics(prometheus.NewRegistry()) }),
 		Module,
 	)
 	fxApp.RequireStart()

@@ -12,7 +12,8 @@ func TestNewMetrics_RegistersWithoutPanic(t *testing.T) {
 	m := NewMetrics(reg)
 
 	if m.RequestsTotal == nil || m.InformerEventsTotal == nil || m.CacheStaleRejectionTotal == nil ||
-		m.QueryDuration == nil || m.CacheEntries == nil || m.CacheSynced == nil {
+		m.QueryDuration == nil || m.CacheEntries == nil || m.CacheSynced == nil ||
+		m.WebhookRequestsTotal == nil || m.WebhookRequestDuration == nil || m.WebhookInjectionsTotal == nil {
 		t.Fatal("NewMetrics left a nil field")
 	}
 }
@@ -103,6 +104,36 @@ func TestCacheEntries_Gauge(t *testing.T) {
 	m.CacheEntries.Set(5)
 	if got := testutil.ToFloat64(m.CacheEntries); got != 5 {
 		t.Errorf("got %v, want 5", got)
+	}
+}
+
+// TestWebhookRequestsTotal_OutcomesAreDistinctSeries confirms allowed and
+// error outcomes are counted separately (by the "outcome" label).
+func TestWebhookRequestsTotal_OutcomesAreDistinctSeries(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+
+	m.WebhookRequestsTotal.WithLabelValues("allowed").Inc()
+	m.WebhookRequestsTotal.WithLabelValues("error").Inc()
+	m.WebhookRequestsTotal.WithLabelValues("error").Inc()
+
+	if got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("allowed")); got != 1 {
+		t.Errorf("allowed: got %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("error")); got != 2 {
+		t.Errorf("error: got %v, want 2", got)
+	}
+}
+
+func TestWebhookInjectionsTotal_Counter(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+
+	m.WebhookInjectionsTotal.Inc()
+	m.WebhookInjectionsTotal.Inc()
+
+	if got := testutil.ToFloat64(m.WebhookInjectionsTotal); got != 2 {
+		t.Errorf("got %v, want 2", got)
 	}
 }
 

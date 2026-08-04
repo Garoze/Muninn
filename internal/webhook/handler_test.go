@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/zap"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -16,11 +18,19 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/garoze/muninn/internal/config"
+	"github.com/garoze/muninn/internal/observability"
 )
 
 func newTestHandler(t *testing.T) *Handler {
 	t.Helper()
-	return NewHandler(zap.NewNop(), &config.Config{})
+	h, _ := newTestHandlerWithMetrics(t)
+	return h
+}
+
+func newTestHandlerWithMetrics(t *testing.T) (*Handler, *observability.Metrics) {
+	t.Helper()
+	m := observability.NewMetrics(prometheus.NewRegistry())
+	return NewHandler(zap.NewNop(), &config.Config{}, m), m
 }
 
 func TestServeHTTP_ValidReview_AllowsAndEchoesUID(t *testing.T) {
@@ -214,6 +224,44 @@ func TestServeHTTP_MalformedJSON_ReturnsBadRequest(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("got status %d, want 400", rec.Code)
+	}
+}
+
+func TestServeHTTP_RecordsMetrics(t *testing.T) {
+	h, m := newTestHandlerWithMetrics(t)
+
+	allowedBody := `{"apiVersion":"admission.k8s.io/v1","kind":"AdmissionReview","request":{"uid":"x"}}`
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/mutate", strings.NewReader(allowedBody)))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/mutate", strings.NewReader("not json")))
+
+	if got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("allowed")); got != 1 {
+		t.Errorf("allowed count: got %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("error")); got != 1 {
+		t.Errorf("error count: got %v, want 1", got)
+	}
+	if got := testutil.CollectAndCount(m.WebhookRequestDuration); got == 0 {
+		t.Error("expected WebhookRequestDuration to have recorded at least one observation")
+	}
+}
+
+func TestServeHTTP_AnnotatedPod_RecordsInjection(t *testing.T) {
+	h, m := newTestHandlerWithMetrics(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "my-pod",
+			Annotations: map[string]string{InjectAnnotation: "true"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app", Image: "example/app:latest"}},
+		},
+	}
+	body := admissionReviewBody(t, "annotated", "ns1", pod)
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(body)))
+
+	if got := testutil.ToFloat64(m.WebhookInjectionsTotal); got != 1 {
+		t.Errorf("injections count: got %v, want 1", got)
 	}
 }
 

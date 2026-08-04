@@ -3,10 +3,12 @@ package webhook
 import (
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/zap"
 
 	"github.com/garoze/muninn/internal/config"
+	"github.com/garoze/muninn/internal/observability"
 )
 
 func TestNewServer_BadCertPathErrors(t *testing.T) {
@@ -15,7 +17,7 @@ func TestNewServer_BadCertPathErrors(t *testing.T) {
 		WebhookTLSCertPath: "/nonexistent/tls.crt",
 		WebhookTLSKeyPath:  "/nonexistent/tls.key",
 	}
-	h := NewHandler(zap.NewNop(), cfg)
+	h := NewHandler(zap.NewNop(), cfg, observability.NewMetrics(prometheus.NewRegistry()))
 
 	_, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
 	if err == nil {
@@ -31,7 +33,7 @@ func TestNewServer_ValidCert_ConfiguresServer(t *testing.T) {
 		WebhookTLSCertPath: certPath,
 		WebhookTLSKeyPath:  keyPath,
 	}
-	h := NewHandler(zap.NewNop(), cfg)
+	h := NewHandler(zap.NewNop(), cfg, observability.NewMetrics(prometheus.NewRegistry()))
 
 	srv, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
 	if err != nil {
