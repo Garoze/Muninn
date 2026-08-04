@@ -39,6 +39,17 @@ type Config struct {
 	// StartupTimeout is how long the Fx application is given to complete its
 	// OnStart hooks, including informer cache sync. Defaults to 2 minutes.
 	StartupTimeout time.Duration
+
+	// WebhookAddr is the bind address for the mutating webhook HTTPS server.
+	WebhookAddr string
+
+	// WebhookTLSCertPath is the path to the TLS certificate served by the
+	// webhook HTTPS server (populated by cert-manager in-cluster)
+	WebhookTLSCertPath string
+
+	// WebhookTLSKeyPath is the path to the TLS private key paired with
+	// WebhookTLSCertPath.
+	WebhookTLSKeyPath string
 }
 
 // New returns a Config populated from enviroment variables.
@@ -53,6 +64,9 @@ func New() *Config {
 		ConfigMapLabelSelector: envOrDefault("CONFIGMAP_LABEL_SELECTOR", "muninn.io/config=runtime"),
 		CacheEntryTTL:          envDuration("CACHE_ENTRY_TTL", 0),
 		StartupTimeout:         envDuration("STARTUP_TIMEOUT", 2*time.Minute),
+		WebhookAddr:            envOrDefault("WEBHOOK_ADDR", ":8443"),
+		WebhookTLSCertPath:     envOrDefault("WEBHOOK_TLS_CERT_PATH", "/etc/webhook/certs/tls.crt"),
+		WebhookTLSKeyPath:      envOrDefault("WEBHOOK_TLS_KEY_PATH", "/etc/webhook/certs/tls.key"),
 	}
 }
 
