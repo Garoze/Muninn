@@ -1,7 +1,6 @@
 MODULE      := github.com/garoze/muninn
 CMD_DIR     := cmd
 BIN_DIR     := bin
-CRD_DIR     := config/crd
 SAMPLES_DIR := config/samples
 MANAGER_DIR := config/manager
 RBAC_DIR    := config/rbac
@@ -9,24 +8,19 @@ PROTO_DIR   := proto
 PROTO_SRC   := $(PROTO_DIR)/v1
 GEN_DIR     := gen
 
-CONTROLLER_GEN  ?= controller-gen
 PROTOC          ?= protoc
 IMG             ?= muninn:latest
 KUBECONFIG      ?= $(HOME)/.kube/config
 CONTAINER_ENGINE ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
 
-TENANT ?=
-KEYS   ?=
+NAMESPACE ?=
+KEYS      ?=
 
 MANAGER_BIN ?= muninn
 QUERY_BIN   ?= muninnctl
 
-.PHONY: generate test test-unit test-integration test-e2e build image load lint \
-	fmt vet tidy proto install-crds sample run query describe deploy undeploy clean
-
-# regenerate deepcopy code from kubebuilder markers
-generate:
-	$(CONTROLLER_GEN) object:headerFile="" paths="./api/..."
+.PHONY: test test-unit test-integration test-e2e build image load lint \
+	fmt vet tidy proto sample run query describe deploy undeploy clean
 
 # regenerate Go code (message types + gRPC stubs) from proto/v1/*.proto
 # requires: protoc, protoc-gen-go, protoc-gen-go-grpc on $PATH
@@ -51,7 +45,7 @@ tidy:
 
 # compile every cmd/ entrypoint into bin/; falls back to a plain
 # typecheck build while no entrypoints exist yet
-build: generate
+build:
 	@found=0; \
 	if [ -d $(CMD_DIR) ]; then \
 		for d in $(CMD_DIR)/*/; do \
@@ -97,37 +91,25 @@ load:
 	$(CONTAINER_ENGINE) tag $(IMG) localhost/$(IMG)
 	$(CONTAINER_ENGINE) save localhost/$(IMG) | sudo k3s ctr images import -
 
-# generate CRD manifests and apply them to the cluster in $KUBECONFIG
-install-crds:
-	$(CONTROLLER_GEN) crd paths="./api/..." output:crd:dir=$(CRD_DIR)
-	kubectl apply -f $(CRD_DIR)
-
-# apply the sample Namespace, Tenant, TenantConfig, and Policy to the cluster
+# apply the sample Namespace and ConfigMap to the cluster
 sample:
 	kubectl apply -f $(SAMPLES_DIR)/namespace.yaml
-	kubectl apply -f $(SAMPLES_DIR)/tenant.yaml
-	kubectl apply -f $(SAMPLES_DIR)/tenantconfig.yaml
-	kubectl apply -f $(SAMPLES_DIR)/policy.yaml
-
-# patch the sample Tenant's status with placeholder CloudResources data
-sample-status:
-	kubectl patch tenant arasaka --type=merge --subresource=status \
-		--patch-file=$(SAMPLES_DIR)/tenant-status-patch.yaml
+	kubectl apply -f $(SAMPLES_DIR)/configmap.yaml
 
 # run the server locally against the cluster in $KUBECONFIG
 run:
 	KUBE_CONFIG_PATH=$(KUBECONFIG) go run ./$(CMD_DIR)/$(MANAGER_BIN)
 
 # query the Muninn Query API, e.g.:
-#   make query TENANT=tenant-abc KEYS=TENANT.id,TENANT.runtime
+#   make query NAMESPACE=arasaka KEYS=LOG_LEVEL,FEATURE_DARKMODE
 query:
-	@if [ -z "$(TENANT)" ] || [ -z "$(KEYS)" ]; then \
-		echo "usage: make query TENANT=<tenant-id> KEYS=<comma,separated,keys>"; \
+	@if [ -z "$(NAMESPACE)" ] || [ -z "$(KEYS)" ]; then \
+		echo "usage: make query NAMESPACE=<namespace> KEYS=<comma,separated,keys>"; \
 		exit 1; \
 	fi
-	go run ./$(CMD_DIR)/$(QUERY_BIN) query --tenant $(TENANT) --keys $(KEYS)
+	go run ./$(CMD_DIR)/$(QUERY_BIN) query --namespace $(NAMESPACE) --keys $(KEYS)
 
-# list the supported configuration keys the Query API will accept
+# list the active configuration sources
 describe:
 	go run ./$(CMD_DIR)/$(QUERY_BIN) describe
 
