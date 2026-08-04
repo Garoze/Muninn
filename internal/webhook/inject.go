@@ -120,7 +120,7 @@ func hasContainer(containers []corev1.Container, name string) bool {
 // appends a single element instead.
 func addVolumeOp(pod *corev1.Pod, vol corev1.Volume) patchOperation {
 	if len(pod.Spec.Volumes) == 0 {
-		return patchOperation{Op: "add", Path: "/spec/volumes", Value: []corev1.Volume{}}
+		return patchOperation{Op: "add", Path: "/spec/volumes", Value: []corev1.Volume{vol}}
 	}
 
 	return patchOperation{Op: "add", Path: "/spec/volumes/-", Value: vol}
@@ -130,7 +130,7 @@ func addVolumeOp(pod *corev1.Pod, vol corev1.Volume) patchOperation {
 // /spec/initContainers, which is nil on most Pods (init containers are
 // less common than volumes on a bare Pod spec).
 func addInitContainerOp(pod *corev1.Pod, c corev1.Container) patchOperation {
-	if len(pod.Spec.Containers) == 0 {
+	if len(pod.Spec.InitContainers) == 0 {
 		return patchOperation{Op: "add", Path: "/spec/initContainers", Value: []corev1.Container{c}}
 	}
 
