@@ -69,11 +69,16 @@ func startServe() (*fx.App, error) {
 }
 
 // startWebhook wires the mutating admission webhook HTTP server. This is
-// "muninn webhook".
+// "muninn webhook". Like NewLogger, NewTracerProvider is called directly
+// rather than pulling in the whole observability.Module - that bundle also
+// brings NewMetrics/startMetricsServer/NewGRPCListener, none of which
+// webhook mode needs.
 func startWebhook() (*fx.App, error) {
 	app := fx.New(
 		fx.Provide(config.New),
 		fx.Provide(observability.NewLogger),
+		fx.Provide(observability.NewTracerProvider),
+		fx.Invoke(observability.ShutdownTracerProvider),
 		webhookModule.Module,
 	)
 
