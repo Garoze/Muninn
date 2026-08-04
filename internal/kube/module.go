@@ -22,12 +22,17 @@ var Module = fx.Options(
 	// a bring-your-own-CRD source becomes an additional fx.Provide into the
 	// same group, with no change to NewWatcher or anything downstream of it.
 	fx.Provide(
-		fx.Annotate(NewConfigMapSource, fx.ResultTags(`group:"config_sources"`)),
+		fx.Annotate(NewConfigMapSource,
+			fx.As(new(ConfigSource)),
+			fx.ResultTags(`group:"config_sources"`),
+		),
 	),
 	fx.Provide(
 		fx.Annotate(NewWatcher, fx.ParamTags("", "", "", "", "", "", "", `group:"config_sources"`)),
 	),
-	fx.Provide(provideConfigSourceDescriptors),
+	fx.Provide(
+		fx.Annotate(provideConfigSourceDescriptors, fx.ParamTags(`group:"config_sources"`)),
+	),
 	fx.Invoke(initControllerRuntimeLogger),
 	fx.Invoke(startWatcher),
 )
