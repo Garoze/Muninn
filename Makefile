@@ -121,12 +121,14 @@ deploy:
 	kubectl apply -f $(RBAC_DIR)/role.yaml
 	kubectl apply -f $(RBAC_DIR)/role_binding.yaml
 	kubectl apply -f $(MANAGER_DIR)/deployment.yaml
+	kubectl apply -f $(MANAGER_DIR)/service.yaml
 
 # tear down everything `make deploy` created (reverse order; the namespace
 # delete alone would cascade the rest, but tearing down explicitly keeps the
 # ClusterRole/ClusterRoleBinding — cluster-scoped, so not caught by that
 # cascade — from being left behind)
 undeploy:
+	kubectl delete -f $(MANAGER_DIR)/service.yaml --ignore-not-found
 	kubectl delete -f $(MANAGER_DIR)/deployment.yaml --ignore-not-found
 	kubectl delete -f $(RBAC_DIR)/role_binding.yaml --ignore-not-found
 	kubectl delete -f $(RBAC_DIR)/role.yaml --ignore-not-found
