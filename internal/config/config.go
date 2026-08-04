@@ -72,6 +72,19 @@ type Config struct {
 	// value, so the two can't drift out of sync.
 	InjectImage string
 
+	// GRPCTLSCertPath is the path to the TLS certificate served by the
+	// gRPC API, if set. Unlike WebhookTLSCertPath, TLS on the gRPC API is
+	// optional: some deployments terminate mTLS at a service mesh sidecar
+	// and want the gRPC server itself to stay plaintext, others don't run
+	// behind a mesh and need the gRPC server to terminate TLS directly.
+	// Empty (the default, alongside GRPCTLSKeyPath) means plaintext.
+	GRPCTLSCertPath string
+
+	// GRPCTLSKeyPath is the path to the TLS private key paired with
+	// GRPCTLSCertPath. Must be set together with GRPCTLSCertPath - one set
+	// without the other is a configuration error, not a partial default.
+	GRPCTLSKeyPath string
+
 	// EnabledConfigSources restricts which registered ConfigSource kinds
 	// (matched against each source's Kind()) actually run, by name.
 	// Empty (the default) means every registered source is enabled - this
@@ -98,6 +111,8 @@ func New() *Config {
 		WebhookTLSKeyPath:      envOrDefault("WEBHOOK_TLS_KEY_PATH", "/etc/webhook/certs/tls.key"),
 		SelfAddr:               envOrDefault("MUNINN_SELF_ADDR", "muninn.muninn-system.svc.cluster.local:5010"),
 		InjectImage:            envOrDefault("MUNINN_INJECT_IMAGE", ""),
+		GRPCTLSCertPath:        os.Getenv("GRPC_TLS_CERT_PATH"),
+		GRPCTLSKeyPath:         os.Getenv("GRPC_TLS_KEY_PATH"),
 		EnabledConfigSources:   envCSV("ENABLED_CONFIG_SOURCES"),
 	}
 }

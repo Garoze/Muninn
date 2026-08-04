@@ -22,6 +22,8 @@ func TestNew_Defaults(t *testing.T) {
 		"CacheEntryTTL":          {cfg.CacheEntryTTL, time.Duration(0)},
 		"StartupTimeout":         {cfg.StartupTimeout, 2 * time.Minute},
 		"SelfAddr":               {cfg.SelfAddr, "muninn.muninn-system.svc.cluster.local:5010"},
+		"GRPCTLSCertPath":        {cfg.GRPCTLSCertPath, ""},
+		"GRPCTLSKeyPath":         {cfg.GRPCTLSKeyPath, ""},
 	}
 
 	for name, tc := range cases {
@@ -49,6 +51,8 @@ func TestNew_EnvOverrides(t *testing.T) {
 	t.Setenv("STARTUP_TIMEOUT", "5m")
 	t.Setenv("MUNINN_SELF_ADDR", "muninn.other-ns.svc.cluster.local:5010")
 	t.Setenv("ENABLED_CONFIG_SOURCES", "ConfigMap, Secret")
+	t.Setenv("GRPC_TLS_CERT_PATH", "/etc/muninn/grpc-tls/tls.crt")
+	t.Setenv("GRPC_TLS_KEY_PATH", "/etc/muninn/grpc-tls/tls.key")
 
 	cfg := New()
 
@@ -85,6 +89,12 @@ func TestNew_EnvOverrides(t *testing.T) {
 	wantSources := []string{"ConfigMap", "Secret"}
 	if !slicesEqual(cfg.EnabledConfigSources, wantSources) {
 		t.Errorf("EnabledConfigSources: got %v, want %v", cfg.EnabledConfigSources, wantSources)
+	}
+	if cfg.GRPCTLSCertPath != "/etc/muninn/grpc-tls/tls.crt" {
+		t.Errorf("GRPCTLSCertPath: got %q", cfg.GRPCTLSCertPath)
+	}
+	if cfg.GRPCTLSKeyPath != "/etc/muninn/grpc-tls/tls.key" {
+		t.Errorf("GRPCTLSKeyPath: got %q", cfg.GRPCTLSKeyPath)
 	}
 }
 

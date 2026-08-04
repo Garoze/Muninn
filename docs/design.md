@@ -464,22 +464,34 @@ authorization. See [ADR-0003](adr/0003-no-caller-auth-on-query-api.md)
 for the full reasoning.
 
 **Tradeoffs:** As built, network-level access to the gRPC API is the only
-access control in effect for direct callers. A real deployment of this
-pattern would need to sit behind cluster-internal network policy, a
-service mesh's mutual TLS, or an API gateway — this is stated as an
-explicit limitation of the reference implementation, not an oversight.
-The same plaintext, network-level-only posture applies to the shared gRPC
-dial helper used by both the debugging CLI and the webhook's injected
-containers — it is a deliberate choice, not an oversight, given the
-network-level access control this service already assumes.
+access control in effect for direct callers, independent of whether TLS
+is enabled on it. A real deployment of this pattern would additionally
+need to sit behind cluster-internal network policy or an API gateway —
+this is stated as an explicit limitation of the reference implementation,
+not an oversight.
 
-The admission webhook sits on a different trust boundary than the gRPC
-API: it is called by the Kubernetes API server itself, over TLS the API
-server requires unconditionally for every registered admission webhook.
-That certificate is issued by an in-cluster certificate authority (not
-built or trusted by this service), with the CA bundle the API server
-needs to validate it kept in sync automatically rather than hand-copied
-into the webhook registration.
+**gRPC API TLS is configurable and optional, not fixed either way.**
+Whether the gRPC server terminates TLS itself is a deployment-time
+choice, not a built-in assumption: a consumer running behind a service
+mesh that already terminates mutual TLS at the sidecar can leave the gRPC
+server plaintext (the default), while a consumer with no mesh in front of
+it can configure a certificate and have the gRPC server terminate TLS
+directly. Neither posture is privileged over the other in the
+implementation — the reference deployment defaults to plaintext because
+it assumes a mesh, not because TLS termination elsewhere is structurally
+required. The same configurability extends to the shared gRPC dial helper
+used by both the debugging CLI and the webhook's injected containers,
+since they connect to the same server.
+
+**Webhook TLS is a separate, already-required case, not a configurable
+one.** The admission webhook sits on a different trust boundary than the
+gRPC API: it is called by the Kubernetes API server itself, over TLS the
+API server requires unconditionally for every registered admission
+webhook — there is no plaintext option, unlike the gRPC API. That
+certificate is issued by an in-cluster certificate authority (not built
+or trusted by this service), with the CA bundle the API server needs to
+validate it kept in sync automatically rather than hand-copied into the
+webhook registration.
 
 No credentials pass through this service in either direction — whatever
 values a ConfigMap or other source object carries are configuration data,

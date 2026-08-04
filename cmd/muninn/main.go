@@ -41,11 +41,24 @@ func startServe() (*fx.App, error) {
 		// explicitly (not otel.GetTracerProvider()'s global) so Fx sequences
 		// NewTracerProvider before this runs - otelgrpc.NewServerHandler resolves
 		// its TracerProvider once at construction, not lazily per request.
-		fx.Provide(func(log *zap.Logger, tp *sdktrace.TracerProvider) (*grpc.Server, *health.Server) {
-			r := observability.NewGRPCServer(log,
+		// TLS is opt-in via cfg.GRPCTLSCertPath/GRPCTLSKeyPath (see
+		// observability.TLSServerOption) - plaintext by default, since many
+		// deployments terminate mTLS at a service mesh sidecar instead.
+		fx.Provide(func(cfg *config.Config, log *zap.Logger, tp *sdktrace.TracerProvider) (*grpc.Server, *health.Server, error) {
+			opts := []grpc.ServerOption{
 				grpc.StatsHandler(otelgrpc.NewServerHandler(otelgrpc.WithTracerProvider(tp))),
-			)
-			return r.Server, r.HealthServer
+			}
+
+			tlsOpt, err := observability.TLSServerOption(cfg)
+			if err != nil {
+				return nil, nil, err
+			}
+			if tlsOpt != nil {
+				opts = append(opts, tlsOpt)
+			}
+
+			r := observability.NewGRPCServer(log, opts...)
+			return r.Server, r.HealthServer, nil
 		}),
 
 		fx.Invoke(func(lc fx.Lifecycle, log *zap.Logger) {
