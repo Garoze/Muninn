@@ -3,6 +3,7 @@ package webhook
 import (
 	"testing"
 
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/zap"
 
 	"github.com/garoze/muninn/internal/config"
@@ -16,7 +17,7 @@ func TestNewServer_BadCertPathErrors(t *testing.T) {
 	}
 	h := NewHandler(zap.NewNop(), cfg)
 
-	_, err := NewServer(cfg, h, zap.NewNop())
+	_, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
 	if err == nil {
 		t.Fatal("expected an error for nonexistent cert/key paths, got nil")
 	}
@@ -32,7 +33,7 @@ func TestNewServer_ValidCert_ConfiguresServer(t *testing.T) {
 	}
 	h := NewHandler(zap.NewNop(), cfg)
 
-	srv, err := NewServer(cfg, h, zap.NewNop())
+	srv, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

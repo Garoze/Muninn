@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxtest"
 	"go.uber.org/zap"
@@ -45,6 +46,7 @@ func TestModule_StartsAndServesRealHTTPS(t *testing.T) {
 	fxApp := fxtest.New(t,
 		fx.Provide(func() *config.Config { return cfg }),
 		fx.Provide(zap.NewNop),
+		fx.Provide(sdktrace.NewTracerProvider),
 		Module,
 	)
 	fxApp.RequireStart()
