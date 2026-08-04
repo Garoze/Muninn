@@ -20,7 +20,7 @@ var Module = fx.Options(
 	fx.Provide(NewGRPCListener),
 	fx.Provide(NewStandaloneHealth),
 	fx.Provide(NewTracerProvider),
-	fx.Invoke(startMetricsServer),
+	fx.Invoke(StartMetricsServer),
 	fx.Invoke(ShutdownTracerProvider),
 )
 
@@ -30,7 +30,11 @@ func NewLogger() (*zap.Logger, error) {
 	return zap.NewProduction()
 }
 
-func startMetricsServer(lc fx.Lifecycle, cfg *config.Config, log *zap.Logger) {
+// StartMetricsServer registers an OnStart/OnStop hook that serves /metrics,
+// so both serve (via Module) and webhook (called directly, to avoid
+// pulling in the gRPC-listener/tracer-provider pieces webhook mode doesn't
+// need from Module) expose it the same way.
+func StartMetricsServer(lc fx.Lifecycle, cfg *config.Config, log *zap.Logger) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 	srv := &http.Server{Addr: cfg.MetricsAddr, Handler: mux}
