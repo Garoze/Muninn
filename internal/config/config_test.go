@@ -31,6 +31,10 @@ func TestNew_Defaults(t *testing.T) {
 			}
 		})
 	}
+
+	if cfg.EnabledConfigSources != nil {
+		t.Errorf("EnabledConfigSources: got %v, want nil (no filter by default)", cfg.EnabledConfigSources)
+	}
 }
 
 func TestNew_EnvOverrides(t *testing.T) {
@@ -44,6 +48,7 @@ func TestNew_EnvOverrides(t *testing.T) {
 	t.Setenv("CACHE_ENTRY_TTL", "30s")
 	t.Setenv("STARTUP_TIMEOUT", "5m")
 	t.Setenv("MUNINN_SELF_ADDR", "muninn.other-ns.svc.cluster.local:5010")
+	t.Setenv("ENABLED_CONFIG_SOURCES", "ConfigMap, Secret")
 
 	cfg := New()
 
@@ -77,6 +82,22 @@ func TestNew_EnvOverrides(t *testing.T) {
 	if cfg.SelfAddr != "muninn.other-ns.svc.cluster.local:5010" {
 		t.Errorf("SelfAddr: got %q", cfg.SelfAddr)
 	}
+	wantSources := []string{"ConfigMap", "Secret"}
+	if !slicesEqual(cfg.EnabledConfigSources, wantSources) {
+		t.Errorf("EnabledConfigSources: got %v, want %v", cfg.EnabledConfigSources, wantSources)
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestEnvOrDefault(t *testing.T) {
@@ -119,6 +140,39 @@ func TestEnvFloat64(t *testing.T) {
 		t.Setenv("MUNINN_TEST_FLOAT_INVALID", "not-a-float")
 		if got := envFloat64("MUNINN_TEST_FLOAT_INVALID", 1.0); got != 1.0 {
 			t.Errorf("got %v, want %v", got, 1.0)
+		}
+	})
+}
+
+func TestEnvCSV(t *testing.T) {
+	t.Run("returns nil when unset", func(t *testing.T) {
+		if got := envCSV("MUNINN_TEST_CSV_UNSET"); got != nil {
+			t.Errorf("got %v, want nil", got)
+		}
+	})
+
+	t.Run("returns nil when set to empty string", func(t *testing.T) {
+		t.Setenv("MUNINN_TEST_CSV_EMPTY", "")
+		if got := envCSV("MUNINN_TEST_CSV_EMPTY"); got != nil {
+			t.Errorf("got %v, want nil", got)
+		}
+	})
+
+	t.Run("splits and trims entries", func(t *testing.T) {
+		t.Setenv("MUNINN_TEST_CSV", "a, b ,c")
+		got := envCSV("MUNINN_TEST_CSV")
+		want := []string{"a", "b", "c"}
+		if !slicesEqual(got, want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("drops empty entries from trailing/double commas", func(t *testing.T) {
+		t.Setenv("MUNINN_TEST_CSV_DIRTY", "a,,b,")
+		got := envCSV("MUNINN_TEST_CSV_DIRTY")
+		want := []string{"a", "b"}
+		if !slicesEqual(got, want) {
+			t.Errorf("got %v, want %v", got, want)
 		}
 	})
 }
