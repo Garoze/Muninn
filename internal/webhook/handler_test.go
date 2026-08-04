@@ -141,6 +141,39 @@ func TestServeHTTP_AnnotatedPod_InjectsPatch(t *testing.T) {
 	if review.Response.PatchType == nil || *review.Response.PatchType != admissionv1.PatchTypeJSONPatch {
 		t.Errorf("PatchType: got %v, want JSONPatch", review.Response.PatchType)
 	}
+
+	// Decode the actual patch content, not just its presence - this is
+	// what would have caught the addVolumeOp/addInitContainerOp bugs found
+	// via manual curl verification (both applied cleanly with Patch != nil,
+	// but the volume was silently empty and the initContainers path was
+	// wrong).
+	var ops []patchOperation
+	if err := json.Unmarshal(review.Response.Patch, &ops); err != nil {
+		t.Fatalf("decode patch: %v", err)
+	}
+	byPath := opsByPath(ops)
+
+	volOp, ok := byPath["/spec/volumes"]
+	if !ok {
+		t.Fatal("missing /spec/volumes op")
+	}
+	var vols []corev1.Volume
+	if b, err := json.Marshal(volOp.Value); err != nil || json.Unmarshal(b, &vols) != nil || len(vols) != 1 || vols[0].Name != volumeName {
+		t.Errorf("volumes op value: got %+v", volOp.Value)
+	}
+
+	initOp, ok := byPath["/spec/initContainers"]
+	if !ok {
+		t.Fatal("missing /spec/initContainers op")
+	}
+	var initContainers []corev1.Container
+	if b, err := json.Marshal(initOp.Value); err != nil || json.Unmarshal(b, &initContainers) != nil || len(initContainers) != 1 || initContainers[0].Name != initContainerName {
+		t.Errorf("initContainers op value: got %+v", initOp.Value)
+	}
+
+	if _, ok := byPath["/spec/containers/0/volumeMounts"]; !ok {
+		t.Error("missing /spec/containers/0/volumeMounts op (app container mount)")
+	}
 }
 
 func TestServeHTTP_UnannotatedPod_NoPatch(t *testing.T) {
