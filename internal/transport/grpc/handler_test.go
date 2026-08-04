@@ -22,8 +22,11 @@ import (
 func newTestHandler(t *testing.T) *DiscoveryHandler {
 	t.Helper()
 	log := zap.NewNop()
+	sources := []app.ConfigSourceDescriptor{
+		{Kind: "ConfigMap", LabelSelector: "muninn.io/config=runtime", Scope: "namespace"},
+	}
 	return &DiscoveryHandler{
-		Service: app.NewDiscoveryService(&config.Config{ConfigMapLabelSelector: "muninn.io/config=runtime"}, log),
+		Service: app.NewDiscoveryService(&config.Config{}, log, sources),
 		Metrics: observability.NewMetrics(prometheus.NewRegistry()),
 		Logger:  log,
 	}
@@ -174,7 +177,7 @@ func TestQuery_MetricsRecordedOnSuccessAndFailure(t *testing.T) {
 
 func TestQuery_StaleCacheIncrementsStaleMetric(t *testing.T) {
 	h := newTestHandler(t)
-	h.Service = app.NewDiscoveryService(&config.Config{CacheEntryTTL: time.Millisecond}, zap.NewNop())
+	h.Service = app.NewDiscoveryService(&config.Config{CacheEntryTTL: time.Millisecond}, zap.NewNop(), nil)
 	h.Service.Cache.SetSynced()
 	h.Service.Cache.Set(&app.ConfigEntry{
 		Namespace: "ns1",

@@ -51,9 +51,10 @@ func TestWatcherProjection(t *testing.T) {
 	metrics := observability.NewMetrics(prometheus.NewRegistry())
 	log := zaptest.NewLogger(t)
 
-	w, err := kube.NewWatcher(cfg, scheme, appCache, metrics, nil, nil, log, &config.Config{
-		ConfigMapLabelSelector: "muninn.io/config=runtime",
-	})
+	sources := []kube.ConfigSource{
+		kube.NewConfigMapSource(&config.Config{ConfigMapLabelSelector: "muninn.io/config=runtime"}),
+	}
+	w, err := kube.NewWatcher(cfg, scheme, appCache, metrics, nil, nil, log, sources)
 	if err != nil {
 		t.Fatalf("new watcher: %v", err)
 	}
@@ -142,8 +143,8 @@ func TestWatcherProjection(t *testing.T) {
 			if e == nil {
 				return false
 			}
-			_, hasA := e.Sources["runtime-config"]
-			return !hasA && e.Sources["feature-flags"]["DARK_MODE"] == "true"
+			_, hasA := e.Sources["ConfigMap/runtime-config"]
+			return !hasA && e.Sources["ConfigMap/feature-flags"]["DARK_MODE"] == "true"
 		}, "ConfigMap delete should clear only its own source, leaving the rest of the entry intact")
 	})
 

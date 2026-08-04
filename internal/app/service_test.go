@@ -157,14 +157,14 @@ func TestConfigEntry_ResolveMissingKey(t *testing.T) {
 // --- DiscoveryService.Describe ---
 
 func TestDescribe_ReturnsConfiguredSource(t *testing.T) {
-	svc := NewDiscoveryService(&config.Config{ConfigMapLabelSelector: "muninn.io/config=runtime"}, zap.NewNop())
+	want := []ConfigSourceDescriptor{
+		{Kind: "ConfigMap", LabelSelector: "muninn.io/config=runtime", Scope: "namespace"},
+	}
+	svc := NewDiscoveryService(&config.Config{}, zap.NewNop(), want)
 
 	sources := svc.Describe()
-	if len(sources) != 1 {
-		t.Fatalf("got %d sources, want 1", len(sources))
-	}
-	if sources[0].Kind != "ConfigMap" || sources[0].LabelSelector != "muninn.io/config=runtime" || sources[0].Scope != "namespace" {
-		t.Errorf("got %+v", sources[0])
+	if len(sources) != 1 || sources[0] != want[0] {
+		t.Errorf("got %+v, want %+v", sources, want)
 	}
 }
 

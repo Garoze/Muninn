@@ -8,7 +8,7 @@ import (
 
 	"go.uber.org/zap"
 	health "google.golang.org/grpc/health"
-	corev1 "k8s.io/api/core/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -17,12 +17,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/garoze/muninn/internal/app"
-	"github.com/garoze/muninn/internal/config"
 	"github.com/garoze/muninn/internal/observability"
 )
 
-// Watcher watches ConfigMaps (scoped by a configurable label selector) via
-// controller-runtime informers and keeps the in-memory app.Cache in sync.
+// Watcher watches a set of pluggable ConfigSources via controller-runtime
+// informers and keeps the in-memory app.Cache in sync.
 type Watcher struct {
 	crCache  ctrlcache.Cache
 	appCache *app.Cache
@@ -30,6 +29,7 @@ type Watcher struct {
 	mainHS   *health.Server
 	probeHS  *observability.StandaloneHealth
 	log      *zap.Logger
+	sources  []ConfigSource
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -51,7 +51,7 @@ type configPatch struct {
 }
 
 // NewWatcher creates a Watcher backed by a controller-runtime cache, scoped
-// to ConfigMaps matching cfg.ConfigMapLabelSelector.
+// to whatever object types and label selectors sources declare.
 func NewWatcher(
 	restCfg *rest.Config,
 	scheme *runtime.Scheme,
@@ -60,7 +60,7 @@ func NewWatcher(
 	mainHS *health.Server,
 	probeHS *observability.StandaloneHealth,
 	log *zap.Logger,
-	cfg *config.Config,
+	sources []ConfigSource,
 ) (*Watcher, error) {
 	if restCfg == nil {
 		return nil, fmt.Errorf("nil rest config")
@@ -82,20 +82,22 @@ func NewWatcher(
 		return nil, fmt.Errorf("nil logger")
 	}
 
-	if cfg == nil {
-		return nil, fmt.Errorf("nil config")
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no config sources registered")
 	}
 
-	selector, err := labels.Parse(cfg.ConfigMapLabelSelector)
-	if err != nil {
-		return nil, fmt.Errorf("parsing configmap label selector %q: %w", cfg.ConfigMapLabelSelector, err)
+	byObject := make(map[client.Object]ctrlcache.ByObject, len(sources))
+	for _, src := range sources {
+		selector, err := labels.Parse(src.LabelSelector())
+		if err != nil {
+			return nil, fmt.Errorf("parsing label selector for %s source: %w", src.Kind(), err)
+		}
+		byObject[src.Watch()] = ctrlcache.ByObject{Label: selector}
 	}
 
 	c, err := ctrlcache.New(restCfg, ctrlcache.Options{
-		Scheme: scheme,
-		ByObject: map[client.Object]ctrlcache.ByObject{
-			&corev1.ConfigMap{}: {Label: selector},
-		},
+		Scheme:   scheme,
+		ByObject: byObject,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating controller-rutime cache: %w", err)
@@ -108,6 +110,7 @@ func NewWatcher(
 		mainHS:   mainHS,
 		probeHS:  probeHS,
 		log:      log.Named("watcher"),
+		sources:  sources,
 	}, nil
 }
 
@@ -116,9 +119,11 @@ func NewWatcher(
 func (w *Watcher) Start(ctx context.Context) error {
 	w.ctx, w.cancel = context.WithCancel(context.Background())
 
-	if err := w.registerInformerHandlers(w.ctx, &corev1.ConfigMap{}, "ConfigMap", w.onConfigMapUpsert, w.onConfigMapDelete); err != nil {
-		w.cancel()
-		return err
+	for _, src := range w.sources {
+		if err := w.registerInformerHandlers(w.ctx, src.Watch(), src.Kind(), w.onSourceUpsert(src), w.onSourceDelete(src)); err != nil {
+			w.cancel()
+			return err
+		}
 	}
 
 	w.metrics.CacheSynced.Set(0)
@@ -174,20 +179,33 @@ func (w *Watcher) Stop() {
 	}
 }
 
-// SeedCache performs an explicit List call after sync to ensure no events
-// were missed between handler registration and cache sync completion.
+// SeedCache performs an explicit List call per source after sync, to ensure
+// no events were missed between handler registration and cache sync
+// completion. apimeta.ExtractList generically pulls the items out of any
+// list type following the standard Items-field convention, so this works
+// for every source without per-kind code.
 func (w *Watcher) SeedCache(ctx context.Context) error {
-	var cmList corev1.ConfigMapList
-	if err := w.crCache.List(ctx, &cmList); err != nil {
-		return err
-	}
+	total := 0
+	for _, src := range w.sources {
+		list := src.List()
+		if err := w.crCache.List(ctx, list); err != nil {
+			return fmt.Errorf("listing %s: %w", src.Kind(), err)
+		}
 
-	for i := range cmList.Items {
-		w.onConfigMapUpsert(&cmList.Items[i])
+		items, err := apimeta.ExtractList(list)
+		if err != nil {
+			return fmt.Errorf("extracting %s list items: %w", src.Kind(), err)
+		}
+
+		upsert := w.onSourceUpsert(src)
+		for _, obj := range items {
+			upsert(obj)
+		}
+		total += len(items)
 	}
 
 	w.log.Info("seeded cache from initial list",
-		zap.Int("configmaps", len(cmList.Items)),
+		zap.Int("objects", total),
 	)
 
 	return nil
@@ -270,72 +288,79 @@ func (w *Watcher) registerInformerHandlers(
 
 // Event Handlers
 
-func (w *Watcher) onConfigMapUpsert(obj any) {
-	cm, ok := obj.(*corev1.ConfigMap)
-	if !ok || cm == nil {
-		w.log.Warn("received non-ConfigMap object in upsert handler; ignoring")
-		return
+// onSourceUpsert returns an upsert handler bound to src. Works for any
+// controller-runtime object type: every watched object already implements
+// client.Object, so no per-kind code is needed here.
+func (w *Watcher) onSourceUpsert(src ConfigSource) func(any) {
+	return func(obj any) {
+		co, ok := obj.(client.Object)
+		if !ok || co == nil {
+			w.log.Warn("received object without client.Object in upsert handler; ignoring",
+				zap.String("kind", src.Kind()),
+			)
+			return
+		}
+
+		w.applyPatch(configPatch{
+			namespace: co.GetNamespace(),
+			source:    sourceKey(src, co),
+			data:      src.Extract(co),
+			revision:  co.GetResourceVersion(),
+			updated:   time.Now().UTC(),
+		})
+
+		w.log.Debug("upserted object",
+			zap.String("kind", src.Kind()),
+			zap.String("namespace", co.GetNamespace()),
+			zap.String("name", co.GetName()),
+			zap.String("resourceVersion", co.GetResourceVersion()),
+		)
 	}
-
-	w.applyPatch(configPatch{
-		namespace: cm.Namespace,
-		source:    cm.Name,
-		data:      toAnyMap(cm.Data),
-		revision:  cm.ResourceVersion,
-		updated:   time.Now().UTC(),
-	})
-
-	w.log.Debug("upserted configmap",
-		zap.String("namespace", cm.Namespace),
-		zap.String("name", cm.Name),
-		zap.String("resourceVersion", cm.ResourceVersion),
-	)
 }
 
-func (w *Watcher) onConfigMapDelete(obj any) {
-	cm := extractConfigMap(obj)
-	if cm == nil {
-		w.log.Warn("received unrecognised ConfigMap delete object; ignoring")
-		return
+func (w *Watcher) onSourceDelete(src ConfigSource) func(any) {
+	return func(obj any) {
+		co := extractObject(obj)
+		if co == nil {
+			w.log.Warn("received unrecognised delete object; ignoring",
+				zap.String("kind", src.Kind()),
+			)
+			return
+		}
+
+		w.applyPatch(configPatch{
+			namespace: co.GetNamespace(),
+			source:    sourceKey(src, co),
+			clearData: true,
+			revision:  co.GetResourceVersion(),
+			updated:   time.Now().UTC(),
+		})
+
+		w.log.Debug("deleted object",
+			zap.String("kind", src.Kind()),
+			zap.String("namespace", co.GetNamespace()),
+			zap.String("name", co.GetName()),
+		)
 	}
-
-	w.applyPatch(configPatch{
-		namespace: cm.Namespace,
-		source:    cm.Name,
-		clearData: true,
-		revision:  cm.ResourceVersion,
-		updated:   time.Now().UTC(),
-	})
-
-	w.log.Debug("deleted configmap",
-		zap.String("namespace", cm.Namespace),
-		zap.String("name", cm.Name),
-	)
 }
 
-func toAnyMap(m map[string]string) map[string]any {
-	if m == nil {
-		return nil
-	}
-
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-
-	return out
+// sourceKey identifies obj's contributed slice within ConfigEntry.Sources.
+// Prefixed by the source's Kind so two different object kinds sharing an
+// object name in the same namespace don't collide as merge sources.
+func sourceKey(src ConfigSource, obj client.Object) string {
+	return src.Kind() + "/" + obj.GetName()
 }
 
-// extractConfigMap handles both direct objects and DeletedFinalStateUnknown
+// extractObject handles both direct objects and DeletedFinalStateUnknown
 // tombstones that the informer may deliver on delete events.
-func extractConfigMap(obj any) *corev1.ConfigMap {
-	if cm, ok := obj.(*corev1.ConfigMap); ok {
-		return cm
+func extractObject(obj any) client.Object {
+	if co, ok := obj.(client.Object); ok {
+		return co
 	}
 
 	inner := unwrapTombstone(obj)
-	if cm, ok := inner.(*corev1.ConfigMap); ok {
-		return cm
+	if co, ok := inner.(client.Object); ok {
+		return co
 	}
 
 	return nil

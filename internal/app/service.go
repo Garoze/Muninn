@@ -139,15 +139,18 @@ type DiscoveryService struct {
 }
 
 // NewDiscoveryService constructs a DiscoveryService with an empty cache.
-func NewDiscoveryService(cfg *config.Config, log *zap.Logger) *DiscoveryService {
+// sources describes the config sources actually registered with the
+// watcher (see internal/kube) - the domain layer reports them via Describe
+// but doesn't import internal/kube to build them itself, preserving the
+// domain/transport boundary (internal/app has no k8s.io/controller-runtime
+// dependency).
+func NewDiscoveryService(cfg *config.Config, log *zap.Logger, sources []ConfigSourceDescriptor) *DiscoveryService {
 	return &DiscoveryService{
 		Cache:         NewCache(),
 		log:           log,
 		cacheEntryTTL: cfg.CacheEntryTTL,
 		now:           time.Now,
-		sources: []ConfigSourceDescriptor{
-			{Kind: "ConfigMap", LabelSelector: cfg.ConfigMapLabelSelector, Scope: "namespace"},
-		},
+		sources:       sources,
 	}
 }
 

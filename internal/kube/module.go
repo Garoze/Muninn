@@ -11,16 +11,44 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/garoze/muninn/internal/app"
 	"github.com/garoze/muninn/internal/config"
 )
 
 var Module = fx.Options(
 	fx.Provide(newRestConfig),
 	fx.Provide(NewScheme),
-	fx.Provide(NewWatcher),
+	// ConfigMapSource is registered into the "config_sources" value group -
+	// a bring-your-own-CRD source becomes an additional fx.Provide into the
+	// same group, with no change to NewWatcher or anything downstream of it.
+	fx.Provide(
+		fx.Annotate(NewConfigMapSource, fx.ResultTags(`group:"config_sources"`)),
+	),
+	fx.Provide(
+		fx.Annotate(NewWatcher, fx.ParamTags("", "", "", "", "", "", "", `group:"config_sources"`)),
+	),
+	fx.Provide(provideConfigSourceDescriptors),
 	fx.Invoke(initControllerRuntimeLogger),
 	fx.Invoke(startWatcher),
 )
+
+// provideConfigSourceDescriptors translates the registered ConfigSources
+// into app.ConfigSourceDescriptor for DiscoveryService.Describe. Lives here
+// (not in internal/app) because ConfigSource depends on
+// sigs.k8s.io/controller-runtime/pkg/client, which internal/app must not
+// import - internal/kube already legitimately imports internal/app, so the
+// translation happens on this side of the boundary.
+func provideConfigSourceDescriptors(sources []ConfigSource) []app.ConfigSourceDescriptor {
+	out := make([]app.ConfigSourceDescriptor, 0, len(sources))
+	for _, s := range sources {
+		out = append(out, app.ConfigSourceDescriptor{
+			Kind:          s.Kind(),
+			LabelSelector: s.LabelSelector(),
+			Scope:         s.Scope(),
+		})
+	}
+	return out
+}
 
 // initControllerRuntimeLogger bridges the zap logger into controller-runtime's
 // logr interface. Must run before any controller-runtime component (cache,

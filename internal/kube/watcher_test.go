@@ -8,9 +8,12 @@ import (
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/garoze/muninn/internal/app"
+	"github.com/garoze/muninn/internal/config"
 	"github.com/garoze/muninn/internal/observability"
 )
 
@@ -22,6 +25,21 @@ func newTestWatcher(t *testing.T) *Watcher {
 		log:      zap.NewNop(),
 	}
 }
+
+// fakeSource is a minimal ConfigSource used to prove the abstraction
+// composes with more than just ConfigMapSource.
+type fakeSource struct {
+	kind          string
+	labelSelector string
+	data          map[string]any
+}
+
+func (f *fakeSource) Kind() string                           { return f.kind }
+func (f *fakeSource) Watch() client.Object                   { return &corev1.Secret{} }
+func (f *fakeSource) List() client.ObjectList                { return &corev1.SecretList{} }
+func (f *fakeSource) LabelSelector() string                  { return f.labelSelector }
+func (f *fakeSource) Scope() string                          { return "namespace" }
+func (f *fakeSource) Extract(_ client.Object) map[string]any { return f.data }
 
 // --- applyPatch: the patch-based cache merge ---
 
@@ -155,46 +173,33 @@ func TestApplyPatch_UpdatedAtUsesExplicitValue(t *testing.T) {
 	}
 }
 
-// --- toAnyMap ---
+// --- extractObject: direct objects, tombstones, and wrong types ---
 
-func TestToAnyMap(t *testing.T) {
-	if got := toAnyMap(nil); got != nil {
-		t.Errorf("nil input: got %+v, want nil", got)
-	}
-
-	got := toAnyMap(map[string]string{"a": "1", "b": "2"})
-	if len(got) != 2 || got["a"] != "1" || got["b"] != "2" {
-		t.Errorf("got %+v", got)
-	}
-}
-
-// --- extractConfigMap: direct objects, tombstones, and wrong types ---
-
-func TestExtractConfigMap(t *testing.T) {
+func TestExtractObject(t *testing.T) {
 	want := &corev1.ConfigMap{Data: map[string]string{"a": "1"}}
 
 	t.Run("direct object", func(t *testing.T) {
-		if got := extractConfigMap(want); got != want {
+		if got := extractObject(want); got != want {
 			t.Errorf("got %+v, want %+v", got, want)
 		}
 	})
 
 	t.Run("tombstone-wrapped object", func(t *testing.T) {
 		tomb := cache.DeletedFinalStateUnknown{Key: "ns1/cm1", Obj: want}
-		if got := extractConfigMap(tomb); got != want {
+		if got := extractObject(tomb); got != want {
 			t.Errorf("got %+v, want %+v", got, want)
 		}
 	})
 
-	t.Run("wrong type returns nil", func(t *testing.T) {
-		if got := extractConfigMap(&corev1.Namespace{}); got != nil {
+	t.Run("non-client.Object returns nil", func(t *testing.T) {
+		if got := extractObject("not an object"); got != nil {
 			t.Errorf("got %+v, want nil", got)
 		}
 	})
 
-	t.Run("tombstone wrapping wrong type returns nil", func(t *testing.T) {
-		tomb := cache.DeletedFinalStateUnknown{Key: "ns1/cm1", Obj: &corev1.Namespace{}}
-		if got := extractConfigMap(tomb); got != nil {
+	t.Run("tombstone wrapping non-client.Object returns nil", func(t *testing.T) {
+		tomb := cache.DeletedFinalStateUnknown{Key: "ns1/cm1", Obj: "not an object"}
+		if got := extractObject(tomb); got != nil {
 			t.Errorf("got %+v, want nil", got)
 		}
 	})
@@ -226,51 +231,111 @@ func TestUnwrapTombstone(t *testing.T) {
 	})
 }
 
-// --- onConfigMapUpsert / onConfigMapDelete ---
+// --- onSourceUpsert / onSourceDelete ---
 
-func TestOnConfigMapUpsert(t *testing.T) {
+func TestOnSourceUpsert(t *testing.T) {
 	w := newTestWatcher(t)
+	src := NewConfigMapSource(&config.Config{})
 	cm := &corev1.ConfigMap{
 		ObjectMeta: objectMeta("ns1", "cm1", "1"),
 		Data:       map[string]string{"LOG_LEVEL": "info"},
 	}
 
-	w.onConfigMapUpsert(cm)
+	w.onSourceUpsert(src)(cm)
 
 	entry := w.appCache.Get("ns1")
-	if entry == nil || entry.Sources["cm1"]["LOG_LEVEL"] != "info" {
+	if entry == nil || entry.Sources["ConfigMap/cm1"]["LOG_LEVEL"] != "info" {
 		t.Fatalf("got %+v", entry)
 	}
 }
 
-func TestOnConfigMapUpsert_WrongTypeIgnored(t *testing.T) {
+func TestOnSourceUpsert_NonClientObjectIgnored(t *testing.T) {
 	w := newTestWatcher(t)
-	w.onConfigMapUpsert(&corev1.Namespace{})
+	w.onSourceUpsert(NewConfigMapSource(&config.Config{}))("not an object")
 
 	if w.appCache.Len() != 0 {
 		t.Errorf("got %d cached namespaces, want 0", w.appCache.Len())
 	}
 }
 
-func TestOnConfigMapDelete_ClearsOwnSourceOnly(t *testing.T) {
+func TestOnSourceDelete_ClearsOwnSourceOnly(t *testing.T) {
 	w := newTestWatcher(t)
-	w.onConfigMapUpsert(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "cm-a", "1"), Data: map[string]string{"LOG_LEVEL": "info"}})
-	w.onConfigMapUpsert(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "cm-b", "2"), Data: map[string]string{"FEATURE_FLAG": "true"}})
+	src := NewConfigMapSource(&config.Config{})
+	upsert := w.onSourceUpsert(src)
+	upsert(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "cm-a", "1"), Data: map[string]string{"LOG_LEVEL": "info"}})
+	upsert(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "cm-b", "2"), Data: map[string]string{"FEATURE_FLAG": "true"}})
 
-	w.onConfigMapDelete(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "cm-a", "3")})
+	w.onSourceDelete(src)(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "cm-a", "3")})
 
 	entry := w.appCache.Get("ns1")
 	if entry == nil {
 		t.Fatal("expected namespace to remain cached (cm-b still present)")
 	}
-	if _, ok := entry.Sources["cm-a"]; ok {
+	if _, ok := entry.Sources["ConfigMap/cm-a"]; ok {
 		t.Errorf("cm-a should have been cleared: got %+v", entry.Sources)
 	}
-	if entry.Sources["cm-b"]["FEATURE_FLAG"] != "true" {
-		t.Errorf("cm-b should be untouched: got %+v", entry.Sources["cm-b"])
+	if entry.Sources["ConfigMap/cm-b"]["FEATURE_FLAG"] != "true" {
+		t.Errorf("cm-b should be untouched: got %+v", entry.Sources["ConfigMap/cm-b"])
+	}
+}
+
+// TestOnSourceUpsert_DifferentKindsDoNotCollide is the concrete proof the
+// ConfigSource abstraction composes: a ConfigMap and an unrelated source
+// kind sharing the same object name in the same namespace must land under
+// distinct Sources keys, not overwrite each other.
+func TestOnSourceUpsert_DifferentKindsDoNotCollide(t *testing.T) {
+	w := newTestWatcher(t)
+	cmSource := NewConfigMapSource(&config.Config{})
+	fake := &fakeSource{kind: "Fake", data: map[string]any{"FAKE_KEY": "fake-value"}}
+
+	w.onSourceUpsert(cmSource)(&corev1.ConfigMap{
+		ObjectMeta: objectMeta("ns1", "same-name", "1"),
+		Data:       map[string]string{"LOG_LEVEL": "info"},
+	})
+	w.onSourceUpsert(fake)(&corev1.Secret{ObjectMeta: objectMeta("ns1", "same-name", "1")})
+
+	entry := w.appCache.Get("ns1")
+	if entry == nil {
+		t.Fatal("expected namespace to be cached")
+	}
+	if entry.Sources["ConfigMap/same-name"]["LOG_LEVEL"] != "info" {
+		t.Errorf("ConfigMap source missing or clobbered: got %+v", entry.Sources)
+	}
+	if entry.Sources["Fake/same-name"]["FAKE_KEY"] != "fake-value" {
+		t.Errorf("Fake source missing or clobbered: got %+v", entry.Sources)
+	}
+	if len(entry.Sources) != 2 {
+		t.Errorf("expected 2 distinct source keys, got %d: %+v", len(entry.Sources), entry.Sources)
 	}
 }
 
 func objectMeta(namespace, name, resourceVersion string) metav1.ObjectMeta {
 	return metav1.ObjectMeta{Namespace: namespace, Name: name, ResourceVersion: resourceVersion}
+}
+
+// --- NewWatcher validation ---
+
+func TestNewWatcher_NoSourcesErrors(t *testing.T) {
+	scheme, err := NewScheme()
+	if err != nil {
+		t.Fatalf("new scheme: %v", err)
+	}
+
+	_, err = NewWatcher(&rest.Config{}, scheme, app.NewCache(), observability.NewMetrics(prometheus.NewRegistry()), nil, nil, zap.NewNop(), nil)
+	if err == nil {
+		t.Fatal("expected an error for zero registered sources, got nil")
+	}
+}
+
+func TestNewWatcher_InvalidLabelSelectorErrors(t *testing.T) {
+	scheme, err := NewScheme()
+	if err != nil {
+		t.Fatalf("new scheme: %v", err)
+	}
+
+	sources := []ConfigSource{&fakeSource{kind: "Fake", labelSelector: "!!!not a valid selector!!!"}}
+	_, err = NewWatcher(&rest.Config{}, scheme, app.NewCache(), observability.NewMetrics(prometheus.NewRegistry()), nil, nil, zap.NewNop(), sources)
+	if err == nil {
+		t.Fatal("expected an error for an invalid label selector, got nil")
+	}
 }
