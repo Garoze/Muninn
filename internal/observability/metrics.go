@@ -22,6 +22,19 @@ type Metrics struct {
 
 	// CacheSynced is 1 when the informer cache has completed initial sync.
 	CacheSynced prometheus.Gauge
+
+	// WebhookRequestsTotal counts /mutate outcomes by outcome label
+	// (allowed/error).
+	WebhookRequestsTotal *prometheus.CounterVec
+
+	// WebhookRequestDuration observes /mutate request latency in seconds,
+	// by outcome label.
+	WebhookRequestDuration *prometheus.HistogramVec
+
+	// WebhookInjectionsTotal counts /mutate requests that actually injected
+	// the volume/init-container/sidecar into a Pod (as opposed to requests
+	// for unannotated Pods, or already-injected ones).
+	WebhookInjectionsTotal prometheus.Counter
 }
 
 // NewMetrics registers and returns all Muninn metrics on the giver registerer.
@@ -63,6 +76,25 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name:      "cache_synced",
 			Help:      "1 if informer cache is sunced and ready to server.",
 		}),
+
+		WebhookRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "webhook",
+			Name:      "requests_total",
+			Help:      "Total /mutate admission review outcomes.",
+		}, []string{"outcome"}),
+
+		WebhookRequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "webhook",
+			Name:      "request_duration_seconds",
+			Help:      "/mutate request latency in seconds.",
+			Buckets:   []float64{0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1},
+		}, []string{"outcome"}),
+
+		WebhookInjectionsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "webhook",
+			Name:      "injections_total",
+			Help:      "Total /mutate requests that actually injected the config volume/containers.",
+		}),
 	}
 
 	reg.MustRegister(
@@ -72,6 +104,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.QueryDuration,
 		m.CacheEntries,
 		m.CacheSynced,
+		m.WebhookRequestsTotal,
+		m.WebhookRequestDuration,
+		m.WebhookInjectionsTotal,
 	)
 
 	return m
