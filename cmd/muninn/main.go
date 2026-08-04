@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
@@ -69,16 +70,19 @@ func startServe() (*fx.App, error) {
 }
 
 // startWebhook wires the mutating admission webhook HTTP server. This is
-// "muninn webhook". Like NewLogger, NewTracerProvider is called directly
-// rather than pulling in the whole observability.Module - that bundle also
-// brings NewMetrics/startMetricsServer/NewGRPCListener, none of which
-// webhook mode needs.
+// "muninn webhook". Like NewLogger, the constructors below are called
+// directly rather than pulling in the whole observability.Module - that
+// bundle also brings NewGRPCListener/NewStandaloneHealth, which webhook
+// mode doesn't need.
 func startWebhook() (*fx.App, error) {
 	app := fx.New(
 		fx.Provide(config.New),
 		fx.Provide(observability.NewLogger),
 		fx.Provide(observability.NewTracerProvider),
 		fx.Invoke(observability.ShutdownTracerProvider),
+		fx.Provide(func() prometheus.Registerer { return prometheus.DefaultRegisterer }),
+		fx.Provide(observability.NewMetrics),
+		fx.Invoke(observability.StartMetricsServer),
 		webhookModule.Module,
 	)
 
