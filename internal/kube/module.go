@@ -27,17 +27,42 @@ var Module = fx.Options(
 			fx.ResultTags(`group:"config_sources"`),
 		),
 	),
+	// filterEnabledSources sits between the raw "config_sources" group and
+	// every consumer of it, so NewWatcher and provideConfigSourceDescriptors
+	// agree on which sources are actually active - Describe reports only
+	// enabled sources, not just registered ones.
 	fx.Provide(
-		fx.Annotate(NewWatcher, fx.ParamTags("", "", "", "", "", "", "", `group:"config_sources"`)),
+		fx.Annotate(filterEnabledSources, fx.ParamTags("", `group:"config_sources"`)),
 	),
-	fx.Provide(
-		fx.Annotate(provideConfigSourceDescriptors, fx.ParamTags(`group:"config_sources"`)),
-	),
+	fx.Provide(NewWatcher),
+	fx.Provide(provideConfigSourceDescriptors),
 	fx.Invoke(initControllerRuntimeLogger),
 	fx.Invoke(startWatcher),
 )
 
-// provideConfigSourceDescriptors translates the registered ConfigSources
+// filterEnabledSources returns only the sources whose Kind() is named in
+// cfg.EnabledConfigSources, or every registered source when that list is
+// empty (the default - nothing filtered).
+func filterEnabledSources(cfg *config.Config, sources []ConfigSource) []ConfigSource {
+	if len(cfg.EnabledConfigSources) == 0 {
+		return sources
+	}
+
+	enabled := make(map[string]bool, len(cfg.EnabledConfigSources))
+	for _, kind := range cfg.EnabledConfigSources {
+		enabled[kind] = true
+	}
+
+	out := make([]ConfigSource, 0, len(sources))
+	for _, s := range sources {
+		if enabled[s.Kind()] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// provideConfigSourceDescriptors translates the enabled ConfigSources
 // into app.ConfigSourceDescriptor for DiscoveryService.Describe. Lives here
 // (not in internal/app) because ConfigSource depends on
 // sigs.k8s.io/controller-runtime/pkg/client, which internal/app must not
