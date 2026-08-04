@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: muninn
+  namespace: muninn-system
+  labels:
+    app: muninn
+spec:
+  type: ClusterIP
+  selector:
+    app: muninn
+  ports:
+    - name: grpc
+      port: 5010
+      targetPort: grpc
+      protocol: TCP
