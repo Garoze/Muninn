@@ -339,7 +339,7 @@ reflects patterns used in a production multi-tenant platform, generalized
 into a standalone config resolver with no platform assumptions baked in.
 Feature-complete for its current scope:
 
-- A pluggable `ConfigSource` interface; `ConfigMap` watching (label-selector scoped) is the registered default, patch-based cache merge across sources
+- A pluggable `ConfigSource` interface; `ConfigMap` watching (label-selector scoped) is the registered default, patch-based cache merge across sources, with `ENABLED_CONFIG_SOURCES` to restrict which registered sources actually run
 - The full gRPC `Query`/`Resolve`/`Describe` API
 - `muninnctl` — a kubectl-style CLI for `query`/`describe`
 - A mutating admission webhook (`muninn webhook`) that injects a shared volume, init container, and sidecar into Pods opted in via annotation, and mounts that volume into the Pod's own containers too — config delivered as a file, no gRPC client needed
@@ -350,10 +350,6 @@ Feature-complete for its current scope:
 - An end-to-end deployment test against a real cluster (`test/e2e`, local-only — see `docs/design.md` for why it's not in CI); the webhook's admission-time behavior is additionally verified manually against a real cluster (see `docs/design.md`'s Testing strategy for why that tier isn't automated)
 - OpenTelemetry tracing and Prometheus metrics on every gRPC call and every webhook admission request, `ParentBased` sampling, with a Jaeger walkthrough for viewing traces (see `docs/design.md`)
 - Fx-based dependency wiring and unit test coverage across every package
-
-Planned next: an operator-facing toggle for enabling/disabling individual
-registered `ConfigSource` kinds at deploy time (currently decided by which
-sources are registered in code).
 
 ## License
 
