@@ -11,34 +11,53 @@ func TestNewMetrics_RegistersWithoutPanic(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewMetrics(reg)
 
-	if m.QueriesTotal == nil || m.InformerEventsTotal == nil || m.CacheStaleRejectionTotal == nil ||
+	if m.RequestsTotal == nil || m.InformerEventsTotal == nil || m.CacheStaleRejectionTotal == nil ||
 		m.QueryDuration == nil || m.CacheEntries == nil || m.CacheSynced == nil {
 		t.Fatal("NewMetrics left a nil field")
 	}
 }
 
-// TestQueriesTotal_LabelCardinality guards against the label mismatch that
-// previously panicked on every Query call: QueriesTotal was declared with a
-// single "event" label but the transport handler always calls
-// WithLabelValues(result, code) - two values.
-func TestQueriesTotal_LabelCardinality(t *testing.T) {
+// TestRequestsTotal_LabelCardinality guards against the label mismatch that
+// previously panicked on every Query call: the metric was once declared with
+// a single "event" label but the transport handler always calls
+// WithLabelValues(operation, result, code) - three values.
+func TestRequestsTotal_LabelCardinality(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewMetrics(reg)
 
 	defer func() {
 		if r := recover(); r != nil {
-			t.Fatalf("WithLabelValues(result, code) panicked: %v", r)
+			t.Fatalf("WithLabelValues(operation, result, code) panicked: %v", r)
 		}
 	}()
 
-	m.QueriesTotal.WithLabelValues("success", "OK").Inc()
+	m.RequestsTotal.WithLabelValues("query", "success", "OK").Inc()
 
-	if got := testutil.ToFloat64(m.QueriesTotal.WithLabelValues("success", "OK")); got != 1 {
+	if got := testutil.ToFloat64(m.RequestsTotal.WithLabelValues("query", "success", "OK")); got != 1 {
 		t.Errorf("got %v, want 1", got)
 	}
 }
 
-func TestQueriesTotal_WrongLabelCountPanics(t *testing.T) {
+// TestRequestsTotal_OperationsAreDistinctSeries confirms Query and Resolve
+// outcomes are counted separately (by the "operation" label) rather than
+// merged into the same series.
+func TestRequestsTotal_OperationsAreDistinctSeries(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+
+	m.RequestsTotal.WithLabelValues("query", "success", "OK").Inc()
+	m.RequestsTotal.WithLabelValues("resolve", "success", "OK").Inc()
+	m.RequestsTotal.WithLabelValues("resolve", "success", "OK").Inc()
+
+	if got := testutil.ToFloat64(m.RequestsTotal.WithLabelValues("query", "success", "OK")); got != 1 {
+		t.Errorf("query: got %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.RequestsTotal.WithLabelValues("resolve", "success", "OK")); got != 2 {
+		t.Errorf("resolve: got %v, want 2", got)
+	}
+}
+
+func TestRequestsTotal_WrongLabelCountPanics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewMetrics(reg)
 
@@ -48,7 +67,7 @@ func TestQueriesTotal_WrongLabelCountPanics(t *testing.T) {
 		}
 	}()
 
-	m.QueriesTotal.WithLabelValues("only-one-label")
+	m.RequestsTotal.WithLabelValues("query", "only-two-labels")
 }
 
 func TestNewMetrics_DoubleRegisterPanics(t *testing.T) {
