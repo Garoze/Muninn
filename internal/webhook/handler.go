@@ -3,27 +3,38 @@ package webhook
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"go.uber.org/zap"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/garoze/muninn/internal/config"
+	"github.com/garoze/muninn/internal/observability"
 )
 
 // Handler serves the mutating webhook's /mutate endpoint.
 type Handler struct {
-	log *zap.Logger
-	cfg *config.Config
+	log     *zap.Logger
+	cfg     *config.Config
+	metrics *observability.Metrics
 }
 
-func NewHandler(log *zap.Logger, cfg *config.Config) *Handler {
-	return &Handler{log: log.Named("webhook"), cfg: cfg}
+func NewHandler(log *zap.Logger, cfg *config.Config, metrics *observability.Metrics) *Handler {
+	return &Handler{log: log.Named("webhook"), cfg: cfg, metrics: metrics}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	outcome := "allowed"
+	defer func() {
+		h.metrics.WebhookRequestsTotal.WithLabelValues(outcome).Inc()
+		h.metrics.WebhookRequestDuration.WithLabelValues(outcome).Observe(time.Since(start).Seconds())
+	}()
+
 	var review admissionv1.AdmissionReview
 	if err := json.NewDecoder(r.Body).Decode(&review); err != nil {
+		outcome = "error"
 		h.log.Error("failed to decode AdmissionReview",
 			zap.Error(err),
 		)
@@ -32,6 +43,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if review.Request == nil {
+		outcome = "error"
 		http.Error(w, "AdmissionReview.Request is nil", http.StatusBadRequest)
 		return
 	}
@@ -57,12 +69,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(ops) > 0 {
 			patchBytes, err := json.Marshal(ops)
 			if err != nil {
+				outcome = "error"
 				h.log.Error("failed to marshal patch",
 					zap.Error(err),
 				)
 				http.Error(w, "failed to build patch", http.StatusInternalServerError)
 				return
 			}
+
+			h.metrics.WebhookInjectionsTotal.Inc()
 
 			patchType := admissionv1.PatchTypeJSONPatch
 			resp.Patch = patchBytes
@@ -83,6 +98,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(out); err != nil {
+		outcome = "error"
 		h.log.Error("failed to encode AdmissionReview response",
 			zap.Error(err),
 		)
