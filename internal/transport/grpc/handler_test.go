@@ -156,7 +156,7 @@ func TestQuery_MetricsRecordedOnSuccessAndFailure(t *testing.T) {
 		Namespace: "ns1",
 		Keys:      []string{"LOG_LEVEL"},
 	})
-	if got := testutil.ToFloat64(h.Metrics.QueriesTotal.WithLabelValues("unavailable", "Unavailable")); got != 1 {
+	if got := testutil.ToFloat64(h.Metrics.RequestsTotal.WithLabelValues("query", "unavailable", "Unavailable")); got != 1 {
 		t.Fatalf("unavailable metric: got %v, want 1", got)
 	}
 
@@ -170,7 +170,7 @@ func TestQuery_MetricsRecordedOnSuccessAndFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := testutil.ToFloat64(h.Metrics.QueriesTotal.WithLabelValues("success", "OK")); got != 1 {
+	if got := testutil.ToFloat64(h.Metrics.RequestsTotal.WithLabelValues("query", "success", "OK")); got != 1 {
 		t.Fatalf("success metric: got %v, want 1", got)
 	}
 }
@@ -190,6 +190,122 @@ func TestQuery_StaleCacheIncrementsStaleMetric(t *testing.T) {
 		Namespace: "ns1",
 		Keys:      []string{"LOG_LEVEL"},
 	})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("got %v, want Unavailable", err)
+	}
+	if got := testutil.ToFloat64(h.Metrics.CacheStaleRejectionTotal); got != 1 {
+		t.Fatalf("got %v, want 1", got)
+	}
+}
+
+// --- Resolve ---
+
+func TestResolve_CacheNotSynced(t *testing.T) {
+	h := newTestHandler(t)
+
+	_, err := h.Resolve(context.Background(), &discoveryv1.ResolveRequest{Namespace: "ns1"})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("got %v, want Unavailable", err)
+	}
+}
+
+func TestResolve_Success(t *testing.T) {
+	h := newTestHandler(t)
+	h.Service.Cache.SetSynced()
+	h.Service.Cache.Set(&app.ConfigEntry{
+		Namespace: "ns1",
+		Sources:   map[string]map[string]any{"cm1": {"LOG_LEVEL": "info", "FEATURE_FLAG": "true"}},
+		Revision:  "1",
+	})
+
+	resp, err := h.Resolve(context.Background(), &discoveryv1.ResolveRequest{Namespace: "ns1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Values) != 2 {
+		t.Fatalf("got %d values, want 2 (everything in the namespace, no keys requested)", len(resp.Values))
+	}
+	if resp.Revision != "1" {
+		t.Errorf("revision: got %q, want %q", resp.Revision, "1")
+	}
+}
+
+func TestResolve_NamespaceNotFoundMapsToNotFound(t *testing.T) {
+	h := newTestHandler(t)
+	h.Service.Cache.SetSynced()
+
+	_, err := h.Resolve(context.Background(), &discoveryv1.ResolveRequest{Namespace: "missing"})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("got %v, want NotFound", err)
+	}
+}
+
+func TestResolve_EmptyNamespaceMapsToInvalidArgument(t *testing.T) {
+	h := newTestHandler(t)
+	h.Service.Cache.SetSynced()
+
+	_, err := h.Resolve(context.Background(), &discoveryv1.ResolveRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("got %v, want InvalidArgument", err)
+	}
+}
+
+func TestResolve_UnserializableValueMapsToInternal(t *testing.T) {
+	h := newTestHandler(t)
+	h.Service.Cache.SetSynced()
+	h.Service.Cache.Set(&app.ConfigEntry{
+		Namespace: "ns1",
+		Revision:  "1",
+		// structpb.NewValue cannot represent a channel; this forces the
+		// handler's serialization-failure branch.
+		Sources: map[string]map[string]any{"cm1": {"bad": make(chan int)}},
+	})
+
+	_, err := h.Resolve(context.Background(), &discoveryv1.ResolveRequest{Namespace: "ns1"})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("got %v, want Internal", err)
+	}
+}
+
+func TestResolve_MetricsRecordedOnSuccessAndFailure(t *testing.T) {
+	h := newTestHandler(t)
+
+	// Failure: cache not synced -> unavailable/Unavailable.
+	_, _ = h.Resolve(context.Background(), &discoveryv1.ResolveRequest{Namespace: "ns1"})
+	if got := testutil.ToFloat64(h.Metrics.RequestsTotal.WithLabelValues("resolve", "unavailable", "Unavailable")); got != 1 {
+		t.Fatalf("unavailable metric: got %v, want 1", got)
+	}
+
+	// Success.
+	h.Service.Cache.SetSynced()
+	h.Service.Cache.Set(&app.ConfigEntry{Namespace: "ns1", Sources: map[string]map[string]any{"cm1": {"LOG_LEVEL": "info"}}, Revision: "1"})
+	_, err := h.Resolve(context.Background(), &discoveryv1.ResolveRequest{Namespace: "ns1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := testutil.ToFloat64(h.Metrics.RequestsTotal.WithLabelValues("resolve", "success", "OK")); got != 1 {
+		t.Fatalf("success metric: got %v, want 1", got)
+	}
+
+	// Confirm Query's and Resolve's counts landed in distinct series rather
+	// than merging - the whole point of the "operation" label.
+	if got := testutil.ToFloat64(h.Metrics.RequestsTotal.WithLabelValues("query", "success", "OK")); got != 0 {
+		t.Errorf("query series should be untouched by Resolve calls: got %v, want 0", got)
+	}
+}
+
+func TestResolve_StaleCacheIncrementsStaleMetric(t *testing.T) {
+	h := newTestHandler(t)
+	h.Service = app.NewDiscoveryService(&config.Config{CacheEntryTTL: time.Millisecond}, zap.NewNop(), nil)
+	h.Service.Cache.SetSynced()
+	h.Service.Cache.Set(&app.ConfigEntry{
+		Namespace: "ns1",
+		Sources:   map[string]map[string]any{"cm1": {"LOG_LEVEL": "info"}},
+		Revision:  "1",
+		UpdatedAt: time.Now().Add(-time.Hour),
+	})
+
+	_, err := h.Resolve(context.Background(), &discoveryv1.ResolveRequest{Namespace: "ns1"})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("got %v, want Unavailable", err)
 	}
