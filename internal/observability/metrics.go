@@ -4,8 +4,9 @@ import "github.com/prometheus/client_golang/prometheus"
 
 // Metrics holds all Prometheus metris for Muninn.
 type Metrics struct {
-	// QueriesTotal counts query outcomes by rsult label and gRPC status code.
-	QueriesTotal *prometheus.CounterVec
+	// RequestsTotal counts RPC outcomes by operation (query/resolve), result
+	// label, and gRPC status code.
+	RequestsTotal *prometheus.CounterVec
 
 	// InformerEventsTotal count CRD informer events by type (add/update/delete)
 	InformerEventsTotal *prometheus.CounterVec
@@ -26,11 +27,11 @@ type Metrics struct {
 // NewMetrics registers and returns all Muninn metrics on the giver registerer.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
 	m := &Metrics{
-		QueriesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+		RequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "discovery",
-			Name:      "queries_total",
-			Help:      "Total discovery query outcoms.",
-		}, []string{"result", "code"}),
+			Name:      "requests_total",
+			Help:      "Total discovery RPC outcomes.",
+		}, []string{"operation", "result", "code"}),
 
 		InformerEventsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "discovery",
@@ -65,7 +66,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	}
 
 	reg.MustRegister(
-		m.QueriesTotal,
+		m.RequestsTotal,
 		m.InformerEventsTotal,
 		m.CacheStaleRejectionTotal,
 		m.QueryDuration,
