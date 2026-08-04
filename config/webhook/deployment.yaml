@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: muninn-webhook
+  namespace: muninn-system
+  labels:
+    app: muninn-webhook
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: muninn-webhook
+  template:
+    metadata:
+      labels:
+        app: muninn-webhook
+    spec:
+      serviceAccountName: muninn-webhook
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: muninn-webhook
+          # NOTE: must match config/manager/deployment.yaml's image by hand -
+          # the YAML-anchor trick used there only works within a single file,
+          # not across the two separated files kubectl apply -f handles independently.
+          image: localhost/muninn:latest
+          imagePullPolicy: Never
+          args: ["webhook"]
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          env:
+            - name: MUNINN_INJECT_IMAGE
+              value: localhost/muninn:latest
+            - name: MUNINN_SELF_ADDR
+              value: muninn.muninn-system.svc.cluster.local:5010
+          volumeMounts:
+            - name: webhook-tls
+              mountPath: /etc/webhook/certs
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: webhook-tls
+          secret:
+            secretName: muninn-webhook-tls
