@@ -103,13 +103,17 @@ func TestBuildPath_FreshPod_AddsVolumeInitSidecarAndAppMount(t *testing.T) {
 		t.Errorf("init container args: got %v, want %v", initC.Args, wantInitArgs)
 	}
 
-	sidecarOp, ok := byPath["/spec/containers/-"]
-	if !ok {
-		t.Fatal("missing /spec/containers/- add op (sidecar)")
+	containersOp, ok := byPath["/spec/containers"]
+	if !ok || containersOp.Op != "replace" {
+		t.Fatal("missing /spec/containers replace op (sidecar)")
 	}
-	sidecar, ok := sidecarOp.Value.(corev1.Container)
-	if !ok || sidecar.Name != sidecarContainerName {
-		t.Fatalf("sidecar op value: got %+v", sidecarOp.Value)
+	containers, ok := containersOp.Value.([]corev1.Container)
+	if !ok || len(containers) != 2 || containers[0].Name != "app" {
+		t.Fatalf("containers op value: got %+v", containersOp.Value)
+	}
+	sidecar := containers[1]
+	if sidecar.Name != sidecarContainerName {
+		t.Fatalf("sidecar name: got %q, want %q", sidecar.Name, sidecarContainerName)
 	}
 	wantSidecarArgs := append(append([]string{}, wantInitArgs...), "--watch", "--interval", sidecarWatchInterval)
 	if !stringSlicesEqual(sidecar.Args, wantSidecarArgs) {
@@ -126,7 +130,7 @@ func TestBuildPath_FreshPod_AddsVolumeInitSidecarAndAppMount(t *testing.T) {
 	}
 }
 
-func TestBuildPath_ExistingVolumesAndInitContainers_Appends(t *testing.T) {
+func TestBuildPath_ExistingVolumesAndInitContainers_ReplacesWholeField(t *testing.T) {
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Volumes: []corev1.Volume{{Name: "other-volume"}},
@@ -145,17 +149,40 @@ func TestBuildPath_ExistingVolumesAndInitContainers_Appends(t *testing.T) {
 	ops := BuildPath(pod, "acme", testConfig())
 	byPath := opsByPath(ops)
 
-	if _, ok := byPath["/spec/volumes/-"]; !ok {
-		t.Errorf("expected append-style /spec/volumes/- op when volumes already exist, got %+v", ops)
+	volOp, ok := byPath["/spec/volumes"]
+	if !ok || volOp.Op != "replace" {
+		t.Fatalf("expected a replace op for /spec/volumes when volumes already exist, got %+v", ops)
 	}
-	if _, ok := byPath["/spec/initContainers/-"]; !ok {
-		t.Errorf("expected append-style /spec/initContainers/- op when initContainers already exist, got %+v", ops)
+	vols := volOp.Value.([]corev1.Volume)
+	if len(vols) != 2 || vols[0].Name != "other-volume" || vols[1].Name != volumeName {
+		t.Errorf("expected existing volume preserved plus muninn-config appended, got %+v", vols)
 	}
-	if _, ok := byPath["/spec/containers/0/volumeMounts/-"]; !ok {
-		t.Errorf("expected append-style /spec/containers/0/volumeMounts/- op when the container already has mounts, got %+v", ops)
+
+	initOp, ok := byPath["/spec/initContainers"]
+	if !ok || initOp.Op != "replace" {
+		t.Fatalf("expected a replace op for /spec/initContainers when initContainers already exist, got %+v", ops)
 	}
-	if _, ok := byPath["/spec/containers/-"]; !ok {
-		t.Errorf("expected sidecar to still be appended, got %+v", ops)
+	initContainers := initOp.Value.([]corev1.Container)
+	if len(initContainers) != 2 || initContainers[0].Name != "other-init" || initContainers[1].Name != initContainerName {
+		t.Errorf("expected existing init container preserved plus muninn's appended, got %+v", initContainers)
+	}
+
+	mountOp, ok := byPath["/spec/containers/0/volumeMounts"]
+	if !ok || mountOp.Op != "replace" {
+		t.Fatalf("expected a replace op for the app container's volumeMounts, got %+v", ops)
+	}
+	mounts := mountOp.Value.([]corev1.VolumeMount)
+	if len(mounts) != 2 || mounts[0].Name != "other-volume" || mounts[1].Name != volumeName {
+		t.Errorf("expected existing mount preserved plus muninn-config appended, got %+v", mounts)
+	}
+
+	containersOp, ok := byPath["/spec/containers"]
+	if !ok || containersOp.Op != "replace" {
+		t.Fatalf("expected a replace op for /spec/containers (sidecar addition), got %+v", ops)
+	}
+	containers := containersOp.Value.([]corev1.Container)
+	if len(containers) != 2 || containers[0].Name != "app" || containers[1].Name != sidecarContainerName {
+		t.Errorf("expected existing app container preserved plus sidecar appended, got %+v", containers)
 	}
 }
 
@@ -187,41 +214,42 @@ func TestBuildPath_AlreadyInjected_IsIdempotent(t *testing.T) {
 	}
 }
 
-func TestAddAppVolumeMountOps_MultipleContainers_MixedState(t *testing.T) {
-	pod := &corev1.Pod{
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{Name: "already-mounted", VolumeMounts: []corev1.VolumeMount{{Name: volumeName, MountPath: mountPath}}},
-				{Name: "no-mounts-yet"},
-				{Name: "has-other-mount", VolumeMounts: []corev1.VolumeMount{{Name: "unrelated", MountPath: "/x"}}},
-			},
-		},
+func TestAppVolumeMountOps_MultipleContainers_MixedState(t *testing.T) {
+	containers := []corev1.Container{
+		{Name: "already-mounted", VolumeMounts: []corev1.VolumeMount{{Name: volumeName, MountPath: mountPath}}},
+		{Name: "no-mounts-yet"},
+		{Name: "has-other-mount", VolumeMounts: []corev1.VolumeMount{{Name: "unrelated", MountPath: "/x"}}},
 	}
 
-	ops := addAppVolumeMountOps(pod)
+	ops := appVolumeMountOps(containers)
 	byPath := opsByPath(ops)
 
 	if len(ops) != 2 {
 		t.Fatalf("got %d ops, want 2 (skip the already-mounted container): %+v", len(ops), ops)
 	}
 	if _, ok := byPath["/spec/containers/0/volumeMounts"]; ok {
-		t.Error("container 0 already has the mount, should have been skipped")
+		t.Error("container 0 already has the mount, should have been skipped (DeepEqual already-equal)")
 	}
-	if _, ok := byPath["/spec/containers/1/volumeMounts"]; !ok {
+	addOp, ok := byPath["/spec/containers/1/volumeMounts"]
+	if !ok || addOp.Op != "add" {
 		t.Error("container 1 has no volumeMounts yet, expected the whole-array add form")
 	}
-	if _, ok := byPath["/spec/containers/2/volumeMounts/-"]; !ok {
-		t.Error("container 2 has an unrelated mount, expected the append form")
+	replaceOp, ok := byPath["/spec/containers/2/volumeMounts"]
+	if !ok || replaceOp.Op != "replace" {
+		t.Error("container 2 has an unrelated mount, expected the whole-array replace form")
 	}
 }
 
-func TestHasVolumeMount(t *testing.T) {
-	c := corev1.Container{VolumeMounts: []corev1.VolumeMount{{Name: "a"}, {Name: "b"}}}
-	if !hasVolumeMount(c, "a") {
-		t.Error("expected true for a mount that exists")
+func TestWithVolumeMount(t *testing.T) {
+	mounts := []corev1.VolumeMount{{Name: "a"}, {Name: "b"}}
+
+	if got := withVolumeMount(mounts, corev1.VolumeMount{Name: "a", MountPath: "/different"}); len(got) != 2 {
+		t.Errorf("expected no change for an already-present name, got %+v", got)
 	}
-	if hasVolumeMount(c, "c") {
-		t.Error("expected false for a mount that doesn't exist")
+
+	got := withVolumeMount(mounts, corev1.VolumeMount{Name: "c"})
+	if len(got) != 3 || got[2].Name != "c" {
+		t.Errorf("expected mount appended for a new name, got %+v", got)
 	}
 }
 

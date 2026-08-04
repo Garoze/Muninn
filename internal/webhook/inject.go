@@ -6,6 +6,7 @@ import (
 
 	"github.com/garoze/muninn/internal/config"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 )
 
 const (
@@ -45,49 +46,105 @@ func ShouldInject(pod *corev1.Pod) bool {
 // integration: without it, a consumer would still need to know Muninn's
 // internal volume name/mount path to read the resolved config themselves.
 //
-// Idempotent by construction: each piece is checked for existence by name
-// before being added, so a webhook re-invoked for the same admission
-// request (the API server can do this) produces the same result, not a
-// duplicate volume/container/mount.
+// Idempotent via equality.Semantic.DeepEqual: each relevant Pod spec field
+// (volumes, initContainers, containers, each container's volumeMounts) is
+// compared as a whole against the desired value for that field, and a patch
+// op is only emitted when they differ. A webhook re-invoked for the same
+// admission request (the API server can do this) sees every field already
+// equal to its desired value and produces zero ops, not a duplicate
+// volume/container/mount - non-idempotent mutation webhooks cause infinite
+// reconciliation loops against the API server.
 func BuildPath(pod *corev1.Pod, namespace string, cfg *config.Config) []patchOperation {
 	var ops []patchOperation
 
-	if !hasVolume(pod, volumeName) {
-		ops = append(ops, addVolumeOp(pod, corev1.Volume{
-			Name:         volumeName,
-			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-		}))
+	if op := volumesOp(pod.Spec.Volumes); op != nil {
+		ops = append(ops, *op)
 	}
 
-	if !hasContainer(pod.Spec.InitContainers, initContainerName) {
-		ops = append(ops, addInitContainerOp(pod, buildResolveContainer(
-			initContainerName, namespace, cfg, false,
-		)))
+	if op := initContainersOp(pod.Spec.InitContainers, namespace, cfg); op != nil {
+		ops = append(ops, *op)
 	}
 
-	if !hasContainer(pod.Spec.Containers, sidecarContainerName) {
-		ops = append(ops, addContainerOp(buildResolveContainer(
-			sidecarContainerName, namespace, cfg, true,
-		)))
+	if op := containersOp(pod.Spec.Containers, namespace, cfg); op != nil {
+		ops = append(ops, *op)
 	}
 
-	ops = append(ops, addAppVolumeMountOps(pod)...)
+	ops = append(ops, appVolumeMountOps(pod.Spec.Containers)...)
 
 	return ops
 }
 
-// addAppVolumeMountOps mounts the shared volume into every container the
-// Pod already had at admission time (not the sidecar being injected in
-// this same call - that one mounts itself in buildResolveContainer), so
-// the application itself can read the resolved config file without any
-// change to its own manifest beyond the opt-in annotation.
-func addAppVolumeMountOps(pod *corev1.Pod) []patchOperation {
+// volumesOp compares the desired /spec/volumes value (current plus the
+// shared muninn-config volume, unless a volume by that name already exists)
+// against the current value via equality.Semantic.DeepEqual, returning a
+// patch op only when they differ.
+func volumesOp(current []corev1.Volume) *patchOperation {
+	vol := corev1.Volume{
+		Name:         volumeName,
+		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+	}
+
+	desired := withVolume(current, vol)
+	if equality.Semantic.DeepEqual(desired, current) {
+		return nil
+	}
+
+	// JSON Patch's "add" to an array path requires the whole array as the
+	// value when the array doesn't exist yet (nil/empty on a fresh Pod
+	// spec, since corev1.PodSpec.Volumes is omitempty); once it exists,
+	// "replace" is the correct op for a whole-array value.
+	if len(current) == 0 {
+		return &patchOperation{Op: "add", Path: "/spec/volumes", Value: desired}
+	}
+	return &patchOperation{Op: "replace", Path: "/spec/volumes", Value: desired}
+}
+
+// initContainersOp mirrors volumesOp for /spec/initContainers, which is
+// also omitempty and nil on most Pods.
+func initContainersOp(current []corev1.Container, namespace string, cfg *config.Config) *patchOperation {
+	c := buildResolveContainer(initContainerName, namespace, cfg, false)
+
+	desired := withContainer(current, c)
+	if equality.Semantic.DeepEqual(desired, current) {
+		return nil
+	}
+
+	if len(current) == 0 {
+		return &patchOperation{Op: "add", Path: "/spec/initContainers", Value: desired}
+	}
+	return &patchOperation{Op: "replace", Path: "/spec/initContainers", Value: desired}
+}
+
+// containersOp mirrors volumesOp for /spec/containers, always via
+// "replace": a valid Pod always has at least one container already, so
+// /spec/containers is never empty/missing at admission time.
+func containersOp(current []corev1.Container, namespace string, cfg *config.Config) *patchOperation {
+	c := buildResolveContainer(sidecarContainerName, namespace, cfg, true)
+
+	desired := withContainer(current, c)
+	if equality.Semantic.DeepEqual(desired, current) {
+		return nil
+	}
+	return &patchOperation{Op: "replace", Path: "/spec/containers", Value: desired}
+}
+
+// appVolumeMountOps mounts the shared volume into every container the Pod
+// already had at admission time (not the sidecar being injected in this
+// same call - that one mounts itself in buildResolveContainer), so the
+// application itself can read the resolved config file without any change
+// to its own manifest beyond the opt-in annotation. containers is
+// pod.Spec.Containers as decoded from the admission request, so indices
+// here stay valid even after containersOp's /spec/containers replace,
+// which only appends the sidecar and leaves existing entries' positions
+// unchanged.
+func appVolumeMountOps(containers []corev1.Container) []patchOperation {
 	var ops []patchOperation
 
 	mount := corev1.VolumeMount{Name: volumeName, MountPath: mountPath}
 
-	for i, c := range pod.Spec.Containers {
-		if hasVolumeMount(c, volumeName) {
+	for i, c := range containers {
+		desired := withVolumeMount(c.VolumeMounts, mount)
+		if equality.Semantic.DeepEqual(desired, c.VolumeMounts) {
 			continue
 		}
 
@@ -95,29 +152,64 @@ func addAppVolumeMountOps(pod *corev1.Pod) []patchOperation {
 			ops = append(ops, patchOperation{
 				Op:    "add",
 				Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
-				Value: []corev1.VolumeMount{mount},
+				Value: desired,
 			})
 			continue
 		}
 
 		ops = append(ops, patchOperation{
-			Op:    "add",
-			Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts/-", i),
-			Value: mount,
+			Op:    "replace",
+			Path:  fmt.Sprintf("/spec/containers/%d/volumeMounts", i),
+			Value: desired,
 		})
 	}
 
 	return ops
 }
 
-func hasVolumeMount(c corev1.Container, name string) bool {
-	for _, vm := range c.VolumeMounts {
-		if vm.Name == name {
-			return true
+// withVolume returns vols with vol appended, unless a volume already named
+// vol.Name is present - matched by name, not full equality, so this never
+// introduces a second volume sharing a name the real Kubernetes API would
+// reject as invalid, even if that pre-existing volume's contents differ
+// from what Muninn would have injected.
+func withVolume(vols []corev1.Volume, vol corev1.Volume) []corev1.Volume {
+	for _, v := range vols {
+		if v.Name == vol.Name {
+			return vols
 		}
 	}
 
-	return false
+	out := make([]corev1.Volume, len(vols), len(vols)+1)
+	copy(out, vols)
+	return append(out, vol)
+}
+
+// withContainer is withVolume's counterpart for a container slice, matched
+// by container Name for the same duplicate-name reason.
+func withContainer(containers []corev1.Container, c corev1.Container) []corev1.Container {
+	for _, existing := range containers {
+		if existing.Name == c.Name {
+			return containers
+		}
+	}
+
+	out := make([]corev1.Container, len(containers), len(containers)+1)
+	copy(out, containers)
+	return append(out, c)
+}
+
+// withVolumeMount is withVolume's counterpart for a single container's
+// VolumeMounts, matched by mount Name for the same duplicate-name reason.
+func withVolumeMount(mounts []corev1.VolumeMount, m corev1.VolumeMount) []corev1.VolumeMount {
+	for _, existing := range mounts {
+		if existing.Name == m.Name {
+			return mounts
+		}
+	}
+
+	out := make([]corev1.VolumeMount, len(mounts), len(mounts)+1)
+	copy(out, mounts)
+	return append(out, m)
 }
 
 // buildResolveContainer builds the init container (watch=false, runs once
@@ -150,53 +242,4 @@ func buildResolveContainer(name, namespace string, cfg *config.Config, watch boo
 			{Name: volumeName, MountPath: mountPath},
 		},
 	}
-}
-
-func hasVolume(pod *corev1.Pod, name string) bool {
-	for _, v := range pod.Spec.Volumes {
-		if v.Name == name {
-			return true
-		}
-	}
-
-	return false
-}
-
-func hasContainer(containers []corev1.Container, name string) bool {
-	for _, c := range containers {
-		if c.Name == name {
-			return true
-		}
-	}
-
-	return false
-}
-
-// addVolumeOp adds vol to /spec/volumes. JSON Patch's "add" to an array
-// path requires the whole array as the value when the array doesn't exist
-// yet (nil/empty on a fresh Pod spec); once it exists, "/spec/volumes/-"
-// appends a single element instead.
-func addVolumeOp(pod *corev1.Pod, vol corev1.Volume) patchOperation {
-	if len(pod.Spec.Volumes) == 0 {
-		return patchOperation{Op: "add", Path: "/spec/volumes", Value: []corev1.Volume{vol}}
-	}
-
-	return patchOperation{Op: "add", Path: "/spec/volumes/-", Value: vol}
-}
-
-// addInitContainerOp mirros addVolumeOp's array-vs-append logic for
-// /spec/initContainers, which is nil on most Pods (init containers are
-// less common than volumes on a bare Pod spec).
-func addInitContainerOp(pod *corev1.Pod, c corev1.Container) patchOperation {
-	if len(pod.Spec.InitContainers) == 0 {
-		return patchOperation{Op: "add", Path: "/spec/initContainers", Value: []corev1.Container{c}}
-	}
-
-	return patchOperation{Op: "add", Path: "/spec/initContainers/-", Value: c}
-}
-
-// addContainerOp always appends: a valid Pod always had at least one
-// container already, so /spec/contrainers is never empty at admission time.
-func addContainerOp(c corev1.Container) patchOperation {
-	return patchOperation{Op: "add", Path: "/spec/containers/-", Value: c}
 }
