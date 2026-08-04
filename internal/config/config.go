@@ -57,6 +57,16 @@ type Config struct {
 	// those run outside Muninn's own Pod and need a stable address rather than
 	// a Pod IP or port-forward.
 	SelfAddr string
+
+	// InjectImage is the container image used for the init container and
+	// sidecar the webhook injects into opted-in Pods. Must match the image
+	// this webhook's own Deployment runs (both invoke the same muninn binary,
+	// just via `resolve` instead of `webhook`). Not derived automatically -
+	// Kubernetes' Downward API has no fieldRef for a container's own image -
+	// so this is set explicitly in config/manager/deployment.yaml, via a YAML
+	// anchor on that Deployment's own image field rather than a hand-copied
+	// value, so the two can't drift out of sync.
+	InjectImage string
 }
 
 // New returns a Config populated from enviroment variables.
@@ -75,6 +85,7 @@ func New() *Config {
 		WebhookTLSCertPath:     envOrDefault("WEBHOOK_TLS_CERT_PATH", "/etc/webhook/certs/tls.crt"),
 		WebhookTLSKeyPath:      envOrDefault("WEBHOOK_TLS_KEY_PATH", "/etc/webhook/certs/tls.key"),
 		SelfAddr:               envOrDefault("MUNINN_SELF_ADDR", "muninn.muninn-system.svc.cluster.local:5010"),
+		InjectImage:            envOrDefault("MUNINN_INJECT_IMAGE", ""),
 	}
 }
 
