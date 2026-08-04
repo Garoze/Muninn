@@ -24,6 +24,7 @@ spec:
         - name: muninn
           image: &muninnImage localhost/muninn:latest
           imagePullPolicy: Never
+          args: ["serve"]
           env:
             # Same value as this container's own image, above - anchored
             # so the two can't drift out of sync. The webhook stamps this
