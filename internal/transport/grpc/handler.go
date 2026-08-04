@@ -43,7 +43,7 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 
 		c := classifyError(err)
 
-		h.Metrics.QueriesTotal.WithLabelValues(c.resultLabel, c.codelabel).Inc()
+		h.Metrics.RequestsTotal.WithLabelValues("query", c.resultLabel, c.codelabel).Inc()
 		h.Logger.Error("query failed",
 			zap.String("method", queryMethod),
 			zap.String("namespace", req.Namespace),
@@ -58,7 +58,7 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 	for _, r := range results {
 		pbValue, convErr := structpb.NewValue(r.Value)
 		if convErr != nil {
-			h.Metrics.QueriesTotal.WithLabelValues("internal", "Internal").Inc()
+			h.Metrics.RequestsTotal.WithLabelValues("query", "internal", "Internal").Inc()
 			h.Logger.Error("failed to serialize query results",
 				zap.String("method", queryMethod),
 				zap.String("namespace", req.Namespace),
@@ -75,7 +75,7 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 		})
 	}
 
-	h.Metrics.QueriesTotal.WithLabelValues("success", "OK").Inc()
+	h.Metrics.RequestsTotal.WithLabelValues("query", "success", "OK").Inc()
 	h.Logger.Info("query completed",
 		zap.String("method", queryMethod),
 		zap.String("namespace", req.Namespace),
@@ -106,6 +106,72 @@ func (h *DiscoveryHandler) Describe(_ context.Context, _ *discoveryv1.DescribeRe
 		})
 	}
 	return resp, nil
+}
+
+const resolveMethod = "/discovery.v1.DiscoveryService/Resolve"
+
+// Resolve translates a gRPC ResolveRequest into a domain Resolve call,
+// records metrics and logs, and maps results back to proto types. Same
+// translation shape as Query, minus keys/stric
+// (Resolve returns everything)
+func (h *DiscoveryHandler) Resolve(ctx context.Context, req *discoveryv1.ResolveRequest) (*discoveryv1.ResolveResponse, error) {
+	start := time.Now()
+
+	results, revision, err := h.Service.Resolve(ctx, req.Namespace)
+
+	h.Metrics.QueryDuration.WithLabelValues("resolve").Observe(time.Since(start).Seconds())
+
+	if err != nil {
+		if errors.Is(err, app.ErrCacheEntryStale) {
+			h.Metrics.CacheStaleRejectionTotal.Inc()
+		}
+
+		c := classifyError(err)
+
+		h.Metrics.RequestsTotal.WithLabelValues("resolve", c.resultLabel, c.codelabel).Inc()
+		h.Logger.Error("resolve failed",
+			zap.String("method", resolveMethod),
+			zap.String("namespace", req.Namespace),
+			zap.String("grpc_code", c.codelabel),
+			zap.Error(err),
+		)
+
+		return nil, status.Error(c.grpcCode, err.Error())
+	}
+
+	values := make([]*discoveryv1.KeyValue, 0, len(results))
+	for _, r := range results {
+		pbValue, convErr := structpb.NewValue(r.Value)
+		if convErr != nil {
+			h.Metrics.RequestsTotal.WithLabelValues("resolve", "internal", "Internal").Inc()
+			h.Logger.Error("failed to serialize resolve results",
+				zap.String("method", resolveMethod),
+				zap.String("namespace", req.Namespace),
+				zap.String("key", r.Key),
+				zap.Error(convErr),
+			)
+
+			return nil, status.Error(codes.Internal, "failed to serialize resolve value")
+		}
+
+		values = append(values, &discoveryv1.KeyValue{
+			Key:    r.Key,
+			Value:  pbValue,
+			Source: r.Source,
+		})
+	}
+
+	h.Metrics.RequestsTotal.WithLabelValues("resolve", "success", "OK").Inc()
+	h.Logger.Info("resolve completed",
+		zap.String("method", resolveMethod),
+		zap.String("namespace", req.Namespace),
+		zap.Int("keys_resolved", len(values)),
+	)
+
+	return &discoveryv1.ResolveResponse{
+		Values:   values,
+		Revision: revision,
+	}, nil
 }
 
 // classifyError maps domain sentinel errors to gRPC status codes and metric labels.
