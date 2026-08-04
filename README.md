@@ -124,22 +124,41 @@ make sample                        # Namespace + a labeled ConfigMap
 
 > [!IMPORTANT]
 > `KUBE_CONFIG_PATH` is Muninn's own config variable, separate from
-> `kubectl`'s `$KUBECONFIG` — setting one does not set the other.
+> `kubectl`'s `$KUBECONFIG`. `make run`'s recipe forwards `$KUBECONFIG`
+> into `KUBE_CONFIG_PATH` for you, so set `KUBECONFIG` (not
+> `KUBE_CONFIG_PATH`) when using `make run` — only the direct `go run`
+> invocation below needs `KUBE_CONFIG_PATH` set explicitly.
 
 ```bash
-export KUBE_CONFIG_PATH=~/.kube/config
+export KUBECONFIG=~/.kube/config
 make run
 ```
 
 or directly:
 
 ```bash
-KUBE_CONFIG_PATH=~/.kube/config go run ./cmd/muninn
+KUBE_CONFIG_PATH=~/.kube/config go run ./cmd/muninn serve
 ```
 
 On success, structured logs report cache sync (`"informers synced and
 watching"`) and the gRPC server binding `:5010` (configurable via
 `GRPC_SERVICE_ADDR`).
+
+### Restricting which sources run (optional)
+
+`ENABLED_CONFIG_SOURCES` narrows the registered `ConfigSource`s down to a
+named subset, by `Kind()` — unset (the default) runs everything
+registered:
+
+```bash
+# only run the ConfigMap source (today's default, made explicit)
+ENABLED_CONFIG_SOURCES=ConfigMap make run
+```
+
+`Describe` reflects the filter — it lists only sources that are both
+registered in code and named here. Naming a kind that isn't registered
+(a typo, for example) leaves nothing enabled and fails startup outright,
+rather than running with no sources watched.
 
 ### Query it
 
