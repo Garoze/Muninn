@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	DiscoveryService_Query_FullMethodName    = "/discovery.v1.DiscoveryService/Query"
 	DiscoveryService_Describe_FullMethodName = "/discovery.v1.DiscoveryService/Describe"
+	DiscoveryService_Resolve_FullMethodName  = "/discovery.v1.DiscoveryService/Resolve"
 )
 
 // DiscoveryServiceClient is the client API for DiscoveryService service.
@@ -38,6 +39,11 @@ type DiscoveryServiceClient interface {
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error)
 	// Describe lists the active configuration sources.
 	Describe(ctx context.Context, in *DescribeRequest, opts ...grpc.CallOption) (*DescribeResponse, error)
+	// Resolve returns everything currently resolved for a namespace - no keys
+	// enumerated up front. Backs the webhook's init container/sidecar, which
+	// don't know ahead of time what keys exist; Query stays keys-in/keys-out
+	// for callers (muninnctl) who do.
+	Resolve(ctx context.Context, in *ResolveRequest, opts ...grpc.CallOption) (*ResolveResponse, error)
 }
 
 type discoveryServiceClient struct {
@@ -68,6 +74,16 @@ func (c *discoveryServiceClient) Describe(ctx context.Context, in *DescribeReque
 	return out, nil
 }
 
+func (c *discoveryServiceClient) Resolve(ctx context.Context, in *ResolveRequest, opts ...grpc.CallOption) (*ResolveResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ResolveResponse)
+	err := c.cc.Invoke(ctx, DiscoveryService_Resolve_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DiscoveryServiceServer is the server API for DiscoveryService service.
 // All implementations must embed UnimplementedDiscoveryServiceServer
 // for forward compatibility.
@@ -83,6 +99,11 @@ type DiscoveryServiceServer interface {
 	Query(context.Context, *QueryRequest) (*QueryResponse, error)
 	// Describe lists the active configuration sources.
 	Describe(context.Context, *DescribeRequest) (*DescribeResponse, error)
+	// Resolve returns everything currently resolved for a namespace - no keys
+	// enumerated up front. Backs the webhook's init container/sidecar, which
+	// don't know ahead of time what keys exist; Query stays keys-in/keys-out
+	// for callers (muninnctl) who do.
+	Resolve(context.Context, *ResolveRequest) (*ResolveResponse, error)
 	mustEmbedUnimplementedDiscoveryServiceServer()
 }
 
@@ -98,6 +119,9 @@ func (UnimplementedDiscoveryServiceServer) Query(context.Context, *QueryRequest)
 }
 func (UnimplementedDiscoveryServiceServer) Describe(context.Context, *DescribeRequest) (*DescribeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Describe not implemented")
+}
+func (UnimplementedDiscoveryServiceServer) Resolve(context.Context, *ResolveRequest) (*ResolveResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Resolve not implemented")
 }
 func (UnimplementedDiscoveryServiceServer) mustEmbedUnimplementedDiscoveryServiceServer() {}
 func (UnimplementedDiscoveryServiceServer) testEmbeddedByValue()                          {}
@@ -156,6 +180,24 @@ func _DiscoveryService_Describe_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DiscoveryService_Resolve_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResolveRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DiscoveryServiceServer).Resolve(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DiscoveryService_Resolve_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DiscoveryServiceServer).Resolve(ctx, req.(*ResolveRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DiscoveryService_ServiceDesc is the grpc.ServiceDesc for DiscoveryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -170,6 +212,10 @@ var DiscoveryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Describe",
 			Handler:    _DiscoveryService_Describe_Handler,
+		},
+		{
+			MethodName: "Resolve",
+			Handler:    _DiscoveryService_Resolve_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

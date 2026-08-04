@@ -146,7 +146,7 @@ type KeyValue struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	Value         *structpb.Value        `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // Which config source (e.g. ConfigMap name) this value was resolved from.
+	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // Which config source (e.g. ConfigMap name) this value was
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -342,6 +342,102 @@ func (x *ConfigSource) GetScope() string {
 	return ""
 }
 
+type ResolveRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"` // REQUIRED
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveRequest) Reset() {
+	*x = ResolveRequest{}
+	mi := &file_discovery_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveRequest) ProtoMessage() {}
+
+func (x *ResolveRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_discovery_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveRequest.ProtoReflect.Descriptor instead.
+func (*ResolveRequest) Descriptor() ([]byte, []int) {
+	return file_discovery_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ResolveRequest) GetNamespace() string {
+	if x != nil {
+		return x.Namespace
+	}
+	return ""
+}
+
+type ResolveResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Values        []*KeyValue            `protobuf:"bytes,1,rep,name=values,proto3" json:"values,omitempty"`
+	Revision      string                 `protobuf:"bytes,2,opt,name=revision,proto3" json:"revision,omitempty"` // Same cache revision token Query returns
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResolveResponse) Reset() {
+	*x = ResolveResponse{}
+	mi := &file_discovery_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResolveResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResolveResponse) ProtoMessage() {}
+
+func (x *ResolveResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_discovery_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResolveResponse.ProtoReflect.Descriptor instead.
+func (*ResolveResponse) Descriptor() ([]byte, []int) {
+	return file_discovery_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *ResolveResponse) GetValues() []*KeyValue {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+func (x *ResolveResponse) GetRevision() string {
+	if x != nil {
+		return x.Revision
+	}
+	return ""
+}
+
 var File_discovery_proto protoreflect.FileDescriptor
 
 const file_discovery_proto_rawDesc = "" +
@@ -365,10 +461,16 @@ const file_discovery_proto_rawDesc = "" +
 	"\fConfigSource\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12%\n" +
 	"\x0elabel_selector\x18\x02 \x01(\tR\rlabelSelector\x12\x14\n" +
-	"\x05scope\x18\x03 \x01(\tR\x05scope2\x9f\x01\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope\".\n" +
+	"\x0eResolveRequest\x12\x1c\n" +
+	"\tnamespace\x18\x01 \x01(\tR\tnamespace\"]\n" +
+	"\x0fResolveResponse\x12.\n" +
+	"\x06values\x18\x01 \x03(\v2\x16.discovery.v1.KeyValueR\x06values\x12\x1a\n" +
+	"\brevision\x18\x02 \x01(\tR\brevision2\xe7\x01\n" +
 	"\x10DiscoveryService\x12@\n" +
 	"\x05Query\x12\x1a.discovery.v1.QueryRequest\x1a\x1b.discovery.v1.QueryResponse\x12I\n" +
-	"\bDescribe\x12\x1d.discovery.v1.DescribeRequest\x1a\x1e.discovery.v1.DescribeResponseB7Z5github.com/garoze/muninn/gen/discovery/v1;discoveryv1b\x06proto3"
+	"\bDescribe\x12\x1d.discovery.v1.DescribeRequest\x1a\x1e.discovery.v1.DescribeResponse\x12F\n" +
+	"\aResolve\x12\x1c.discovery.v1.ResolveRequest\x1a\x1d.discovery.v1.ResolveResponseB7Z5github.com/garoze/muninn/gen/discovery/v1;discoveryv1b\x06proto3"
 
 var (
 	file_discovery_proto_rawDescOnce sync.Once
@@ -382,7 +484,7 @@ func file_discovery_proto_rawDescGZIP() []byte {
 	return file_discovery_proto_rawDescData
 }
 
-var file_discovery_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_discovery_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_discovery_proto_goTypes = []any{
 	(*QueryRequest)(nil),     // 0: discovery.v1.QueryRequest
 	(*QueryResponse)(nil),    // 1: discovery.v1.QueryResponse
@@ -390,21 +492,26 @@ var file_discovery_proto_goTypes = []any{
 	(*DescribeRequest)(nil),  // 3: discovery.v1.DescribeRequest
 	(*DescribeResponse)(nil), // 4: discovery.v1.DescribeResponse
 	(*ConfigSource)(nil),     // 5: discovery.v1.ConfigSource
-	(*structpb.Value)(nil),   // 6: google.protobuf.Value
+	(*ResolveRequest)(nil),   // 6: discovery.v1.ResolveRequest
+	(*ResolveResponse)(nil),  // 7: discovery.v1.ResolveResponse
+	(*structpb.Value)(nil),   // 8: google.protobuf.Value
 }
 var file_discovery_proto_depIdxs = []int32{
 	2, // 0: discovery.v1.QueryResponse.values:type_name -> discovery.v1.KeyValue
-	6, // 1: discovery.v1.KeyValue.value:type_name -> google.protobuf.Value
+	8, // 1: discovery.v1.KeyValue.value:type_name -> google.protobuf.Value
 	5, // 2: discovery.v1.DescribeResponse.sources:type_name -> discovery.v1.ConfigSource
-	0, // 3: discovery.v1.DiscoveryService.Query:input_type -> discovery.v1.QueryRequest
-	3, // 4: discovery.v1.DiscoveryService.Describe:input_type -> discovery.v1.DescribeRequest
-	1, // 5: discovery.v1.DiscoveryService.Query:output_type -> discovery.v1.QueryResponse
-	4, // 6: discovery.v1.DiscoveryService.Describe:output_type -> discovery.v1.DescribeResponse
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	2, // 3: discovery.v1.ResolveResponse.values:type_name -> discovery.v1.KeyValue
+	0, // 4: discovery.v1.DiscoveryService.Query:input_type -> discovery.v1.QueryRequest
+	3, // 5: discovery.v1.DiscoveryService.Describe:input_type -> discovery.v1.DescribeRequest
+	6, // 6: discovery.v1.DiscoveryService.Resolve:input_type -> discovery.v1.ResolveRequest
+	1, // 7: discovery.v1.DiscoveryService.Query:output_type -> discovery.v1.QueryResponse
+	4, // 8: discovery.v1.DiscoveryService.Describe:output_type -> discovery.v1.DescribeResponse
+	7, // 9: discovery.v1.DiscoveryService.Resolve:output_type -> discovery.v1.ResolveResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_discovery_proto_init() }
@@ -418,7 +525,7 @@ func file_discovery_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_discovery_proto_rawDesc), len(file_discovery_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

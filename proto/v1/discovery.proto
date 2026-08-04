@@ -18,12 +18,18 @@ service DiscoveryService {
 
   // Describe lists the active configuration sources.
   rpc Describe(DescribeRequest) returns (DescribeResponse);
+
+  // Resolve returns everything currently resolved for a namespace - no keys
+  // enumerated up front. Backs the webhook's init container/sidecar, which
+  // don't know ahead of time what keys exist; Query stays keys-in/keys-out
+  // for callers (muninnctl) who do.
+  rpc Resolve(ResolveRequest) returns (ResolveResponse);
 }
 
 message QueryRequest {
-  string namespace = 1; // REQUIRED. Namespace to resolve configuration for.
+  string namespace = 1;     // REQUIRED. Namespace to resolve configuration for.
   repeated string keys = 2; // REQUIRED. Keys to fetch.
-  bool strict = 3; // If true, any missing key returns InvalidArgument.
+  bool strict = 3;          // If true, any missing key returns InvalidArgument.
 }
 
 message QueryResponse {
@@ -36,7 +42,8 @@ message QueryResponse {
 message KeyValue {
   string key = 1;
   google.protobuf.Value value = 2;
-  string source = 3; // Which config source (e.g. ConfigMap name) this value was resolved from.
+  string source = 3; // Which config source (e.g. ConfigMap name) this value was
+                     // resolved from.
 }
 
 message DescribeRequest {}
@@ -47,4 +54,13 @@ message ConfigSource {
   string kind = 1;           // e.g. "ConfigMap"
   string label_selector = 2; // Selector scoping which objects are watched.
   string scope = 3;          // e.g. "namespace"
+}
+
+message ResolveRequest {
+  string namespace = 1; // REQUIRED
+}
+
+message ResolveResponse {
+  repeated KeyValue values = 1;
+  string revision = 2; // Same cache revision token Query returns
 }
