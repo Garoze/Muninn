@@ -85,9 +85,15 @@ func buildResolveContainer(name, namespace string, cfg *config.Config, watch boo
 	}
 
 	return corev1.Container{
-		Name:  name,
-		Image: cfg.InjectImage,
-		Args:  args,
+		Name: name,
+		// Explicit, not left to default: a ":latest" tag (InjectImage's
+		// usual local-dev value) defaults to PullAlways otherwise, which
+		// tries to pull from a registry named "localhost" and fails -
+		// IfNotPresent uses an already-loaded local image but still pulls
+		// in a real registry-backed deployment, unlike PullNever.
+		Image:           cfg.InjectImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Args:            args,
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: volumeName, MountPath: mountPath},
 		},
