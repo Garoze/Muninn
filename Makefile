@@ -98,7 +98,7 @@ sample:
 
 # run the server locally against the cluster in $KUBECONFIG
 run:
-	KUBE_CONFIG_PATH=$(KUBECONFIG) go run ./$(CMD_DIR)/$(MANAGER_BIN)
+	KUBE_CONFIG_PATH=$(KUBECONFIG) go run ./$(CMD_DIR)/$(MANAGER_BIN) serve
 
 # query the Muninn Query API, e.g.:
 #   make query NAMESPACE=arasaka KEYS=LOG_LEVEL,FEATURE_DARKMODE
