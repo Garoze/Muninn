@@ -3,24 +3,26 @@ package kube
 import (
 	"context"
 	"fmt"
-	"strings"
+	"maps"
 	"time"
 
 	"go.uber.org/zap"
 	health "google.golang.org/grpc/health"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	ctrlcache "sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/garoze/muninn/api/v1alpha1"
 	"github.com/garoze/muninn/internal/app"
+	"github.com/garoze/muninn/internal/config"
 	"github.com/garoze/muninn/internal/observability"
 )
 
-// Watcher watches Tenant, TenantConfig, and Policy CRDs via controller-runtime
-// Informers and keeps the in-memory app.Cache in sync.
+// Watcher watches ConfigMaps (scoped by a configurable label selector) via
+// controller-runtime informers and keeps the in-memory app.Cache in sync.
 type Watcher struct {
 	crCache  ctrlcache.Cache
 	appCache *app.Cache
@@ -33,37 +35,34 @@ type Watcher struct {
 	cancel context.CancelFunc
 }
 
-// tenantPatch carries a resource-scoped update for a single tenant.
-// Each CRD handler sets only the fields it orns - a Policy update
-// never touches RuntimeConfig, and vice versa.
-type tenantPatch struct {
-	tenantID string
+// configPatch carries a source-scoped update for a single namespace.
+// Each source (e.g. a ConfigMap) owns its own slice of the cache entry -
+// one source's update never clobbers another source's data for the same
+// namespace.
+type configPatch struct {
+	namespace string
+	source    string
 
-	displayName    *string
-	runtimeConfig  map[string]any
-	cloudResources map[string]any
-	authzPolicy    *app.AuthzPolicySnapshot
-
-	clearDisplayName    bool
-	clearRuntimeConfig  bool
-	clearCloudResources bool
-	clearAuthzPolicy    bool
+	data      map[string]any
+	clearData bool
 
 	revision string
 	updated  time.Time
 }
 
-// NewWatcher creates a Watcher backed by a controller-runtime cache.
+// NewWatcher creates a Watcher backed by a controller-runtime cache, scoped
+// to ConfigMaps matching cfg.ConfigMapLabelSelector.
 func NewWatcher(
-	cfg *rest.Config,
+	restCfg *rest.Config,
 	scheme *runtime.Scheme,
 	appCache *app.Cache,
 	metrics *observability.Metrics,
 	mainHS *health.Server,
 	probeHS *observability.StandaloneHealth,
 	log *zap.Logger,
+	cfg *config.Config,
 ) (*Watcher, error) {
-	if cfg == nil {
+	if restCfg == nil {
 		return nil, fmt.Errorf("nil rest config")
 	}
 
@@ -83,7 +82,21 @@ func NewWatcher(
 		return nil, fmt.Errorf("nil logger")
 	}
 
-	c, err := ctrlcache.New(cfg, ctrlcache.Options{Scheme: scheme})
+	if cfg == nil {
+		return nil, fmt.Errorf("nil config")
+	}
+
+	selector, err := labels.Parse(cfg.ConfigMapLabelSelector)
+	if err != nil {
+		return nil, fmt.Errorf("parsing configmap label selector %q: %w", cfg.ConfigMapLabelSelector, err)
+	}
+
+	c, err := ctrlcache.New(restCfg, ctrlcache.Options{
+		Scheme: scheme,
+		ByObject: map[client.Object]ctrlcache.ByObject{
+			&corev1.ConfigMap{}: {Label: selector},
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating controller-rutime cache: %w", err)
 	}
@@ -103,17 +116,7 @@ func NewWatcher(
 func (w *Watcher) Start(ctx context.Context) error {
 	w.ctx, w.cancel = context.WithCancel(context.Background())
 
-	if err := w.registerInformerHandlers(w.ctx, &v1alpha1.Tenant{}, "Tenant", w.onTenantUpsert, w.onTenantDelete); err != nil {
-		w.cancel()
-		return err
-	}
-
-	if err := w.registerInformerHandlers(w.ctx, &v1alpha1.TenantConfig{}, "TenantConfig", w.onTenantConfigUpsert, w.onTenantConfigDelete); err != nil {
-		w.cancel()
-		return err
-	}
-
-	if err := w.registerInformerHandlers(w.ctx, &v1alpha1.Policy{}, "Policy", w.onPolicyUpsert, w.onPolicyDelete); err != nil {
+	if err := w.registerInformerHandlers(w.ctx, &corev1.ConfigMap{}, "ConfigMap", w.onConfigMapUpsert, w.onConfigMapDelete); err != nil {
 		w.cancel()
 		return err
 	}
@@ -157,7 +160,7 @@ func (w *Watcher) Start(ctx context.Context) error {
 	w.metrics.CacheEntries.Set(float64(w.appCache.Len()))
 	observability.MarkHealthServing(w.mainHS, w.probeHS)
 	w.log.Info("informers synced and watching",
-		zap.Int("tenants_cached", w.appCache.Len()),
+		zap.Int("namespaces_cached", w.appCache.Len()),
 	)
 	return nil
 }
@@ -171,103 +174,63 @@ func (w *Watcher) Stop() {
 	}
 }
 
-// SeedCache performs explicit List calls after sync to ensure no events
+// SeedCache performs an explicit List call after sync to ensure no events
 // were missed between handler registration and cache sync completion.
 func (w *Watcher) SeedCache(ctx context.Context) error {
-	var tenantList v1alpha1.TenantList
-	if err := w.crCache.List(ctx, &tenantList); err != nil {
+	var cmList corev1.ConfigMapList
+	if err := w.crCache.List(ctx, &cmList); err != nil {
 		return err
 	}
 
-	for i := range tenantList.Items {
-		w.onTenantUpsert(&tenantList.Items[i])
-	}
-
-	var tcList v1alpha1.TenantConfigList
-	if err := w.crCache.List(ctx, &tcList); err != nil {
-		return err
-	}
-
-	for i := range tcList.Items {
-		w.onTenantConfigUpsert(&tcList.Items[i])
-	}
-
-	var policyList v1alpha1.PolicyList
-	if err := w.crCache.List(ctx, &policyList); err != nil {
-		return err
-	}
-
-	for i := range policyList.Items {
-		w.onPolicyUpsert(&policyList.Items[i])
+	for i := range cmList.Items {
+		w.onConfigMapUpsert(&cmList.Items[i])
 	}
 
 	w.log.Info("seeded cache from initial list",
-		zap.Int("tenants", len(tenantList.Items)),
-		zap.Int("tenants_config", len(tcList.Items)),
-		zap.Int("policies", len(policyList.Items)),
+		zap.Int("configmaps", len(cmList.Items)),
 	)
 
 	return nil
 }
 
-func (w *Watcher) applyPatch(p tenantPatch) {
-	if p.tenantID == "" {
+func (w *Watcher) applyPatch(p configPatch) {
+	if p.namespace == "" {
 		return
 	}
 
-	cur := w.appCache.Get(p.tenantID)
-	if cur == nil {
-		cur = &app.TenantState{TenantID: p.tenantID}
+	cur := w.appCache.Get(p.namespace)
+
+	sources := make(map[string]map[string]any)
+	revision := p.revision
+	if cur != nil {
+		maps.Copy(sources, cur.Sources)
+		if revision == "" {
+			revision = cur.Revision
+		}
 	}
 
-	next := *cur
-
-	if p.displayName != nil {
-		next.DisplayName = *p.displayName
+	if p.data != nil {
+		sources[p.source] = p.data
 	}
 
-	if p.runtimeConfig != nil {
-		next.RuntimeConfig = p.runtimeConfig
+	if p.clearData {
+		delete(sources, p.source)
 	}
 
-	if p.cloudResources != nil {
-		next.CloudResources = p.cloudResources
+	updated := p.updated
+	if updated.IsZero() {
+		updated = time.Now().UTC()
 	}
 
-	if p.authzPolicy != nil {
-		next.AuthzPolicy = p.authzPolicy
-	}
-
-	if p.clearDisplayName {
-		next.DisplayName = ""
-	}
-
-	if p.clearRuntimeConfig {
-		next.RuntimeConfig = nil
-	}
-
-	if p.clearCloudResources {
-		next.CloudResources = nil
-	}
-
-	if p.clearAuthzPolicy {
-		next.AuthzPolicy = nil
-	}
-
-	if p.revision != "" {
-		next.Revision = p.revision
-	}
-
-	if p.updated.IsZero() {
-		next.UpdatedAt = time.Now().UTC()
+	if len(sources) == 0 {
+		w.appCache.Delete(p.namespace)
 	} else {
-		next.UpdatedAt = p.updated
-	}
-
-	if next.DisplayName == "" && next.RuntimeConfig == nil && next.CloudResources == nil && next.AuthzPolicy == nil {
-		w.appCache.Delete(next.TenantID)
-	} else {
-		w.appCache.Set(&next)
+		w.appCache.Set(&app.ConfigEntry{
+			Namespace: p.namespace,
+			Sources:   sources,
+			Revision:  revision,
+			UpdatedAt: updated,
+		})
 	}
 
 	w.metrics.CacheEntries.Set(float64(w.appCache.Len()))
@@ -307,178 +270,47 @@ func (w *Watcher) registerInformerHandlers(
 
 // Event Handlers
 
-func (w *Watcher) onTenantUpsert(obj any) {
-	t, ok := obj.(*v1alpha1.Tenant)
-	if !ok || t == nil {
-		w.log.Warn("received non-Tenant object in upsert handler; ignoring")
+func (w *Watcher) onConfigMapUpsert(obj any) {
+	cm, ok := obj.(*corev1.ConfigMap)
+	if !ok || cm == nil {
+		w.log.Warn("received non-ConfigMap object in upsert handler; ignoring")
 		return
 	}
 
-	key := tenantCacheKey(t)
-	if key == "" {
-		w.log.Debug("tenant missing tenantID and status.namespace; skipping",
-			zap.String("resourceVersion", t.ResourceVersion),
-		)
-	}
-
-	displayName := t.Spec.DisplayName
-	w.applyPatch(tenantPatch{
-		tenantID:       key,
-		displayName:    &displayName,
-		cloudResources: toCloudResourcesMap(t.Status.CloudResources),
-		revision:       t.ResourceVersion,
-		updated:        time.Now().UTC(),
+	w.applyPatch(configPatch{
+		namespace: cm.Namespace,
+		source:    cm.Name,
+		data:      toAnyMap(cm.Data),
+		revision:  cm.ResourceVersion,
+		updated:   time.Now().UTC(),
 	})
 
-	w.log.Debug("upserted tenant",
-		zap.String("tenant_id", key),
-		zap.String("resourceVersion", t.ResourceVersion),
+	w.log.Debug("upserted configmap",
+		zap.String("namespace", cm.Namespace),
+		zap.String("name", cm.Name),
+		zap.String("resourceVersion", cm.ResourceVersion),
 	)
 }
 
-func (w *Watcher) onTenantDelete(obj any) {
-	t := extractTenant(obj)
-	if t == nil {
-		w.log.Warn("received unrecognied Tenant delete object; ignoring")
+func (w *Watcher) onConfigMapDelete(obj any) {
+	cm := extractConfigMap(obj)
+	if cm == nil {
+		w.log.Warn("received unrecognised ConfigMap delete object; ignoring")
 		return
 	}
 
-	key := tenantCacheKey(t)
-	if key == "" {
-		return
-	}
-
-	// Tenant is the identity anchor, unlike TenantConfig/Policy: its deletion
-	// terminates the whole cache entry unconditionally, rather than clearing
-	// only the fields Tenant owns via applyPatch. A Tenant can legitimately
-	// exist with no TenantConfig/Policy yet, but TenantConfig/Policy without a
-	// backing Tenant is an orphan that shouldn't keep answering Query calls.
-	w.appCache.Delete(key)
-	w.metrics.CacheEntries.Set(float64(w.appCache.Len()))
-
-	w.log.Debug("deleted tenant",
-		zap.String("tenant_id", key),
-	)
-}
-
-func (w *Watcher) onTenantConfigUpsert(obj any) {
-	tc, ok := obj.(*v1alpha1.TenantConfig)
-	if !ok || tc == nil {
-		w.log.Warn("received non-TenantConfig object in upsert handler; ignoring")
-		return
-	}
-
-	tenantID := tenantIDFromNamespace(tc.Namespace)
-	if tenantID == "" {
-		w.log.Warn("tenant config missing namespace; ignoring",
-			zap.String("resourceVersion", tc.ResourceVersion),
-		)
-	}
-
-	w.applyPatch(tenantPatch{
-		tenantID:      tenantID,
-		runtimeConfig: toAnyMap(tc.Spec.RuntimeConfig),
-		revision:      tc.ResourceVersion,
-		updated:       time.Now().UTC(),
+	w.applyPatch(configPatch{
+		namespace: cm.Namespace,
+		source:    cm.Name,
+		clearData: true,
+		revision:  cm.ResourceVersion,
+		updated:   time.Now().UTC(),
 	})
 
-	w.log.Debug("upserted tenant config",
-		zap.String("tenant_id", tenantID),
+	w.log.Debug("deleted configmap",
+		zap.String("namespace", cm.Namespace),
+		zap.String("name", cm.Name),
 	)
-}
-
-func (w *Watcher) onTenantConfigDelete(obj any) {
-	tc := extractTenantConfig(obj)
-	if tc == nil {
-		w.log.Warn("received unrecognised TenantConfig delete object; ignoring")
-		return
-	}
-
-	tenantID := tenantIDFromNamespace(tc.Namespace)
-	if tenantID == "" {
-		return
-	}
-
-	w.applyPatch(tenantPatch{
-		tenantID:           tenantID,
-		clearRuntimeConfig: true,
-		revision:           tc.ResourceVersion,
-		updated:            time.Now().UTC(),
-	})
-
-	w.log.Debug("deleted tenant config",
-		zap.String("tenant_id", tenantID),
-	)
-}
-
-func (w *Watcher) onPolicyUpsert(obj any) {
-	pol, ok := obj.(*v1alpha1.Policy)
-	if !ok || pol == nil {
-		w.log.Warn("received non-Policy object in upsert handler; ignoring")
-		return
-	}
-
-	tenantID := tenantIDFromNamespace(pol.Namespace)
-	if tenantID == "" {
-		w.log.Warn("policy missing namespace; ignoring",
-			zap.String("resourceVersion", pol.ResourceVersion),
-		)
-	}
-
-	w.applyPatch(tenantPatch{
-		tenantID:    tenantID,
-		authzPolicy: toAuthzPolicySnapshot(pol),
-		revision:    pol.ResourceVersion,
-		updated:     time.Now().UTC(),
-	})
-
-	w.log.Debug("upserted policy",
-		zap.String("tenant_id", tenantID),
-	)
-}
-
-func (w *Watcher) onPolicyDelete(obj any) {
-	pol := extractPolicy(obj)
-	if pol == nil {
-		w.log.Warn("received unrecognised Policy delete object; ignoring")
-		return
-	}
-
-	tenantID := tenantIDFromNamespace(pol.Namespace)
-	if tenantID == "" {
-		return
-	}
-
-	w.applyPatch(tenantPatch{
-		tenantID:         tenantID,
-		clearAuthzPolicy: true,
-		revision:         pol.ResourceVersion,
-		updated:          time.Now().UTC(),
-	})
-
-	w.log.Debug("deleted policy",
-		zap.String("tenant_id", tenantID),
-	)
-}
-
-func tenantCacheKey(t *v1alpha1.Tenant) string {
-	if t == nil {
-		return ""
-	}
-
-	if t.Spec.TenantID != "" {
-		return t.Spec.TenantID
-	}
-
-	if t.Status.Namespace != "" {
-		return strings.TrimPrefix(t.Status.Namespace, "tenant-")
-	}
-
-	return ""
-}
-
-func tenantIDFromNamespace(namesapce string) string {
-	return strings.TrimPrefix(namesapce, "tenant-")
 }
 
 func toAnyMap(m map[string]string) map[string]any {
@@ -494,94 +326,16 @@ func toAnyMap(m map[string]string) map[string]any {
 	return out
 }
 
-func toCloudResourcesMap(cr v1alpha1.CloudResources) map[string]any {
-	out := map[string]any{}
-	if cr.IdentityPoolID != "" {
-		out["identityPoolID"] = cr.IdentityPoolID
-	}
-
-	if cr.IdentityPoolARN != "" {
-		out["identityPoolARN"] = cr.IdentityPoolARN
-	}
-
-	if cr.StorageBucketName != "" {
-		out["storageBucketName"] = cr.StorageBucketName
-	}
-
-	if len(out) == 0 {
-		return nil
-	}
-
-	return out
-}
-
-func toAuthzPolicySnapshot(pol *v1alpha1.Policy) *app.AuthzPolicySnapshot {
-	if pol == nil {
-		return nil
-	}
-
-	out := &app.AuthzPolicySnapshot{
-		IssuerAllowList: append([]string(nil), pol.Spec.JWT.IssuerAllowList...),
-		SubjectClaim:    pol.Spec.JWT.SubjectClaim,
-		ScopesClaim:     pol.Spec.JWT.ScopesClaim,
-		Bindings:        make([]app.AuthzBindingSnapshot, 0, len(pol.Spec.Bindings)),
-		RoleBindings:    make([]app.AuthzRoleBindingSnapshot, 0, len(pol.Spec.RoleBindings)),
-	}
-
-	for _, b := range pol.Spec.Bindings {
-		out.Bindings = append(out.Bindings, app.AuthzBindingSnapshot{
-			Subject:     b.Subject,
-			Permissions: append([]string(nil), b.Permissions...),
-		})
-	}
-
-	for _, rb := range pol.Spec.RoleBindings {
-		out.RoleBindings = append(out.RoleBindings, app.AuthzRoleBindingSnapshot{
-			Role:        rb.Role,
-			Permissions: append([]string(nil), rb.Permissions...),
-		})
-	}
-
-	return out
-}
-
-// extract* helpers handle both direct objects and DeletedFinalStateUnknow
+// extractConfigMap handles both direct objects and DeletedFinalStateUnknown
 // tombstones that the informer may deliver on delete events.
-
-func extractTenant(obj any) *v1alpha1.Tenant {
-	if t, ok := obj.(*v1alpha1.Tenant); ok {
-		return t
+func extractConfigMap(obj any) *corev1.ConfigMap {
+	if cm, ok := obj.(*corev1.ConfigMap); ok {
+		return cm
 	}
 
 	inner := unwrapTombstone(obj)
-	if t, ok := inner.(*v1alpha1.Tenant); ok {
-		return t
-	}
-
-	return nil
-}
-
-func extractTenantConfig(obj any) *v1alpha1.TenantConfig {
-	if tc, ok := obj.(*v1alpha1.TenantConfig); ok {
-		return tc
-	}
-
-	inner := unwrapTombstone(obj)
-	if tc, ok := inner.(*v1alpha1.TenantConfig); ok {
-		return tc
-	}
-
-	return nil
-}
-
-func extractPolicy(obj any) *v1alpha1.Policy {
-	if p, ok := obj.(*v1alpha1.Policy); ok {
-		return p
-	}
-
-	inner := unwrapTombstone(obj)
-	if p, ok := inner.(*v1alpha1.Policy); ok {
-		return p
+	if cm, ok := inner.(*corev1.ConfigMap); ok {
+		return cm
 	}
 
 	return nil

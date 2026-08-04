@@ -24,7 +24,6 @@ import (
 	"k8s.io/client-go/transport/spdy"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	v1alpha1 "github.com/garoze/muninn/api/v1alpha1"
 	discoveryv1 "github.com/garoze/muninn/gen/discovery/v1"
 	"github.com/garoze/muninn/internal/kube"
 )
@@ -33,7 +32,7 @@ const (
 	deployNamespace = "muninn-system"
 	localPort       = 15010 // avoid colliding with a locally-running `make run`
 	podPort         = 5010
-	e2eTenantID     = "e2e-tenant"
+	e2eNamespace    = "e2e-test-ns"
 )
 
 var deployAppLabels = client.MatchingLabels{"app": "muninn"}
@@ -64,10 +63,9 @@ func TestE2E(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	// Self-contained fixtures with a distinct tenant ID, so this doesn't
+	// Self-contained fixtures in a distinct namespace, so this doesn't
 	// collide with sample data a human may have already applied by hand.
-	tenantNamespace := "tenant-" + e2eTenantID
-	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: tenantNamespace}}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: e2eNamespace}}
 	if err := k8sClient.Create(context.Background(), ns); err != nil {
 		t.Fatalf("create namespace: %v", err)
 	}
@@ -75,18 +73,22 @@ func TestE2E(t *testing.T) {
 		_ = k8sClient.Delete(context.Background(), ns)
 	})
 
-	tenant := &v1alpha1.Tenant{
-		ObjectMeta: metav1.ObjectMeta{Name: e2eTenantID},
-		Spec: v1alpha1.TenantSpec{
-			TenantID:    e2eTenantID,
-			DisplayName: "E2E Test Tenant",
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "runtime-config",
+			Namespace: e2eNamespace,
+			Labels:    map[string]string{"muninn.io/config": "runtime"},
+		},
+		Data: map[string]string{
+			"LOG_LEVEL":    "info",
+			"DISPLAY_NAME": "E2E Test Namespace",
 		},
 	}
-	if err := k8sClient.Create(context.Background(), tenant); err != nil {
-		t.Fatalf("create tenant: %v", err)
+	if err := k8sClient.Create(context.Background(), cm); err != nil {
+		t.Fatalf("create configmap: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = k8sClient.Delete(context.Background(), tenant)
+		_ = k8sClient.Delete(context.Background(), cm)
 	})
 
 	runMake(t, repoRoot, "deploy")
@@ -128,8 +130,8 @@ func TestE2E(t *testing.T) {
 		defer cancel()
 
 		resp, err := discoveryClient.Query(ctx, &discoveryv1.QueryRequest{
-			TenantId: e2eTenantID,
-			Keys:     []string{"TENANT.id", "TENANT.displayName"},
+			Namespace: e2eNamespace,
+			Keys:      []string{"LOG_LEVEL", "DISPLAY_NAME"},
 		})
 		if err != nil {
 			return false
@@ -140,10 +142,10 @@ func TestE2E(t *testing.T) {
 			values[kv.GetKey()] = kv.GetValue().AsInterface()
 		}
 
-		return values["TENANT.id"] == e2eTenantID && values["TENANT.displayName"] == "E2E Test Tenant"
-	}, "deployed Muninn did not return expected data for the e2e test tenant")
+		return values["LOG_LEVEL"] == "info" && values["DISPLAY_NAME"] == "E2E Test Namespace"
+	}, "deployed Muninn did not return expected data for the e2e test namespace")
 
-	t.Run("Describe lists the supported key namespace", func(t *testing.T) {
+	t.Run("Describe lists the active config sources", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
@@ -151,8 +153,8 @@ func TestE2E(t *testing.T) {
 		if err != nil {
 			t.Fatalf("describe: %v", err)
 		}
-		if len(resp.GetSupportedKeys()) == 0 {
-			t.Fatal("expected at least one supported key")
+		if len(resp.GetSources()) == 0 {
+			t.Fatal("expected at least one config source")
 		}
 	})
 }

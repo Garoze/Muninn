@@ -29,6 +29,9 @@ type Config struct {
 	// When empty, in-cluster config is used.
 	KubeConfigPath string
 
+	// ConfigMapLabelSelector scopes which ConfigMaps the watcher watches.
+	ConfigMapLabelSelector string
+
 	// CacheEntryTTL controls staleness enforcement for tenant cache entries.
 	// Zero disables stale-entry rejection.
 	CacheEntryTTL time.Duration
@@ -41,14 +44,15 @@ type Config struct {
 // New returns a Config populated from enviroment variables.
 func New() *Config {
 	return &Config{
-		GrpcServiceAddr:      envOrDefault("GRPC_SERVICE_ADDR", ":5010"),
-		GrpcProbeAddr:        envOrDefault("GRPC_PROBE_ADDR", ":5011"),
-		MetricsAddr:          envOrDefault("METRICS_ADDR", ":9090"),
-		OTELExporterEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
-		TraceSampleRatio:     envFloat64("OTEL_TRACES_SAMPLE_ARG", 0.1),
-		KubeConfigPath:       os.Getenv("KUBE_CONFIG_PATH"),
-		CacheEntryTTL:        envDuration("CACHE_ENTRY_TTL", 0),
-		StartupTimeout:       envDuration("STARTUP_TIMEOUT", 2*time.Minute),
+		GrpcServiceAddr:        envOrDefault("GRPC_SERVICE_ADDR", ":5010"),
+		GrpcProbeAddr:          envOrDefault("GRPC_PROBE_ADDR", ":5011"),
+		MetricsAddr:            envOrDefault("METRICS_ADDR", ":9090"),
+		OTELExporterEndpoint:   envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
+		TraceSampleRatio:       envFloat64("OTEL_TRACES_SAMPLE_ARG", 0.1),
+		KubeConfigPath:         os.Getenv("KUBE_CONFIG_PATH"),
+		ConfigMapLabelSelector: envOrDefault("CONFIGMAP_LABEL_SELECTOR", "muninn.io/config=runtime"),
+		CacheEntryTTL:          envDuration("CACHE_ENTRY_TTL", 0),
+		StartupTimeout:         envDuration("STARTUP_TIMEOUT", 2*time.Minute),
 	}
 }
 

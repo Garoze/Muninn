@@ -27,15 +27,16 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// DiscoveryService provides tenant-scoped runtime configuration lookup.
+// DiscoveryService provides namespace-scoped runtime configuration lookup.
 //
-// Watches Tenant, TenantConfig, and Policy CRDs via controller-runtime
-// informers, maintains a patch-based in-memory cache keyed by tenant ID,
-// and serves only whitelisted configuration keys.
+// Watches Kubernetes ConfigMaps (and, optionally, other registered config
+// sources) via controller-runtime informers, maintains a patch-based
+// in-memory cache keyed by namespace, and serves whatever keys are present
+// in the resolved configuration.
 type DiscoveryServiceClient interface {
-	// Query returns configuration values for specified tenant and keys.
+	// Query returns configuration values for the specified namespace and keys.
 	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error)
-	// Describe list all supported configuration keys and their value types.
+	// Describe lists the active configuration sources.
 	Describe(ctx context.Context, in *DescribeRequest, opts ...grpc.CallOption) (*DescribeResponse, error)
 }
 
@@ -71,15 +72,16 @@ func (c *discoveryServiceClient) Describe(ctx context.Context, in *DescribeReque
 // All implementations must embed UnimplementedDiscoveryServiceServer
 // for forward compatibility.
 //
-// DiscoveryService provides tenant-scoped runtime configuration lookup.
+// DiscoveryService provides namespace-scoped runtime configuration lookup.
 //
-// Watches Tenant, TenantConfig, and Policy CRDs via controller-runtime
-// informers, maintains a patch-based in-memory cache keyed by tenant ID,
-// and serves only whitelisted configuration keys.
+// Watches Kubernetes ConfigMaps (and, optionally, other registered config
+// sources) via controller-runtime informers, maintains a patch-based
+// in-memory cache keyed by namespace, and serves whatever keys are present
+// in the resolved configuration.
 type DiscoveryServiceServer interface {
-	// Query returns configuration values for specified tenant and keys.
+	// Query returns configuration values for the specified namespace and keys.
 	Query(context.Context, *QueryRequest) (*QueryResponse, error)
-	// Describe list all supported configuration keys and their value types.
+	// Describe lists the active configuration sources.
 	Describe(context.Context, *DescribeRequest) (*DescribeResponse, error)
 	mustEmbedUnimplementedDiscoveryServiceServer()
 }

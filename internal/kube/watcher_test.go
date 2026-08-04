@@ -6,9 +6,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 
-	v1alpha1 "github.com/garoze/muninn/api/v1alpha1"
 	"github.com/garoze/muninn/internal/app"
 	"github.com/garoze/muninn/internal/observability"
 )
@@ -24,225 +25,133 @@ func newTestWatcher(t *testing.T) *Watcher {
 
 // --- applyPatch: the patch-based cache merge ---
 
-func TestApplyPatch_EmptyTenantIDIsNoop(t *testing.T) {
+func TestApplyPatch_EmptyNamespaceIsNoop(t *testing.T) {
 	w := newTestWatcher(t)
-	w.applyPatch(tenantPatch{tenantID: ""})
+	w.applyPatch(configPatch{namespace: ""})
 
 	if w.appCache.Len() != 0 {
-		t.Errorf("got %d cached tenants, want 0", w.appCache.Len())
+		t.Errorf("got %d cached namespaces, want 0", w.appCache.Len())
 	}
 }
 
-func TestApplyPatch_CreatesNewTenant(t *testing.T) {
+func TestApplyPatch_CreatesNewEntry(t *testing.T) {
 	w := newTestWatcher(t)
-	name := "Arasaka"
-	w.applyPatch(tenantPatch{tenantID: "t1", displayName: &name, revision: "1"})
-
-	state := w.appCache.Get("t1")
-	if state == nil {
-		t.Fatal("expected tenant to be cached")
-	}
-	if state.DisplayName != "Arasaka" {
-		t.Errorf("DisplayName: got %q, want %q", state.DisplayName, "Arasaka")
-	}
-}
-
-// TestApplyPatch_ResourceScopedMerge is the core claim this project makes:
-// a Policy update must not clobber TenantConfig data, and vice versa,
-// because each CRD's handler only sets the tenantPatch fields it owns.
-func TestApplyPatch_ResourceScopedMerge(t *testing.T) {
-	w := newTestWatcher(t)
-	name := "Arasaka"
-
-	// Tenant patch sets displayName only.
-	w.applyPatch(tenantPatch{tenantID: "t1", displayName: &name, revision: "1"})
-
-	// TenantConfig patch sets runtimeConfig only.
-	w.applyPatch(tenantPatch{
-		tenantID:      "t1",
-		runtimeConfig: map[string]any{"LOG_LEVEL": "info"},
-		revision:      "2",
+	w.applyPatch(configPatch{
+		namespace: "ns1",
+		source:    "cm1",
+		data:      map[string]any{"LOG_LEVEL": "info"},
+		revision:  "1",
 	})
 
-	// Policy patch sets authzPolicy only.
-	w.applyPatch(tenantPatch{
-		tenantID:    "t1",
-		authzPolicy: &app.AuthzPolicySnapshot{SubjectClaim: "sub"},
-		revision:    "3",
-	})
-
-	state := w.appCache.Get("t1")
-	if state == nil {
-		t.Fatal("expected tenant to be cached")
+	entry := w.appCache.Get("ns1")
+	if entry == nil {
+		t.Fatal("expected namespace to be cached")
 	}
-	if state.DisplayName != "Arasaka" {
-		t.Errorf("DisplayName was clobbered: got %q, want %q", state.DisplayName, "Arasaka")
-	}
-	if state.RuntimeConfig["LOG_LEVEL"] != "info" {
-		t.Errorf("RuntimeConfig was clobbered: got %+v", state.RuntimeConfig)
-	}
-	if state.AuthzPolicy == nil || state.AuthzPolicy.SubjectClaim != "sub" {
-		t.Errorf("AuthzPolicy was clobbered: got %+v", state.AuthzPolicy)
-	}
-	if state.Revision != "3" {
-		t.Errorf("Revision: got %q, want latest patch's revision %q", state.Revision, "3")
+	if entry.Sources["cm1"]["LOG_LEVEL"] != "info" {
+		t.Errorf("got %+v", entry.Sources)
 	}
 }
 
-func TestApplyPatch_ClearDisplayNameOnlyClearsThatField(t *testing.T) {
+// TestApplyPatch_SourceScopedMerge is the core claim this project makes: one
+// ConfigMap's update must not clobber another ConfigMap's data in the same
+// namespace, because each source's patch only ever touches its own slice.
+func TestApplyPatch_SourceScopedMerge(t *testing.T) {
 	w := newTestWatcher(t)
-	name := "Arasaka"
-	w.applyPatch(tenantPatch{tenantID: "t1", displayName: &name, revision: "1"})
-	w.applyPatch(tenantPatch{
-		tenantID:      "t1",
-		runtimeConfig: map[string]any{"LOG_LEVEL": "info"},
-		revision:      "2",
+
+	w.applyPatch(configPatch{
+		namespace: "ns1",
+		source:    "cm-a",
+		data:      map[string]any{"LOG_LEVEL": "info"},
+		revision:  "1",
 	})
 
-	w.applyPatch(tenantPatch{tenantID: "t1", clearDisplayName: true, revision: "3"})
+	w.applyPatch(configPatch{
+		namespace: "ns1",
+		source:    "cm-b",
+		data:      map[string]any{"FEATURE_FLAG": "true"},
+		revision:  "2",
+	})
 
-	state := w.appCache.Get("t1")
-	if state == nil {
-		t.Fatal("expected tenant to remain cached (RuntimeConfig still present)")
+	entry := w.appCache.Get("ns1")
+	if entry == nil {
+		t.Fatal("expected namespace to be cached")
 	}
-	if state.DisplayName != "" {
-		t.Errorf("DisplayName: got %q, want cleared", state.DisplayName)
+	if entry.Sources["cm-a"]["LOG_LEVEL"] != "info" {
+		t.Errorf("cm-a data was clobbered: got %+v", entry.Sources["cm-a"])
 	}
-	if state.RuntimeConfig["LOG_LEVEL"] != "info" {
-		t.Errorf("RuntimeConfig should be untouched by a displayName clear: got %+v", state.RuntimeConfig)
+	if entry.Sources["cm-b"]["FEATURE_FLAG"] != "true" {
+		t.Errorf("cm-b data was clobbered: got %+v", entry.Sources["cm-b"])
+	}
+	if entry.Revision != "2" {
+		t.Errorf("Revision: got %q, want latest patch's revision %q", entry.Revision, "2")
 	}
 }
 
-func TestApplyPatch_ClearRuntimeConfigOnlyClearsThatField(t *testing.T) {
+func TestApplyPatch_ClearOnlyClearsOwnSource(t *testing.T) {
 	w := newTestWatcher(t)
-	name := "Arasaka"
-	w.applyPatch(tenantPatch{tenantID: "t1", displayName: &name, revision: "1"})
-	w.applyPatch(tenantPatch{
-		tenantID:      "t1",
-		runtimeConfig: map[string]any{"LOG_LEVEL": "info"},
-		revision:      "2",
-	})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{"LOG_LEVEL": "info"}, revision: "1"})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-b", data: map[string]any{"FEATURE_FLAG": "true"}, revision: "2"})
 
-	w.applyPatch(tenantPatch{tenantID: "t1", clearRuntimeConfig: true, revision: "3"})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", clearData: true, revision: "3"})
 
-	state := w.appCache.Get("t1")
-	if state == nil {
-		t.Fatal("expected tenant to remain cached (DisplayName still present)")
+	entry := w.appCache.Get("ns1")
+	if entry == nil {
+		t.Fatal("expected namespace to remain cached (cm-b still present)")
 	}
-	if state.RuntimeConfig != nil {
-		t.Errorf("RuntimeConfig: got %+v, want cleared", state.RuntimeConfig)
+	if _, ok := entry.Sources["cm-a"]; ok {
+		t.Errorf("cm-a should have been cleared: got %+v", entry.Sources)
 	}
-	if state.DisplayName != "Arasaka" {
-		t.Errorf("DisplayName should be untouched by a runtimeConfig clear: got %q", state.DisplayName)
+	if entry.Sources["cm-b"]["FEATURE_FLAG"] != "true" {
+		t.Errorf("cm-b should be untouched by cm-a's clear: got %+v", entry.Sources["cm-b"])
 	}
 }
 
-func TestApplyPatch_DeletesEntryWhenAllFieldsEmpty(t *testing.T) {
+func TestApplyPatch_DeletesEntryWhenAllSourcesCleared(t *testing.T) {
 	w := newTestWatcher(t)
-	name := "Arasaka"
-	w.applyPatch(tenantPatch{tenantID: "t1", displayName: &name, revision: "1"})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{"LOG_LEVEL": "info"}, revision: "1"})
 
-	if w.appCache.Get("t1") == nil {
-		t.Fatal("precondition: expected tenant to be cached")
+	if w.appCache.Get("ns1") == nil {
+		t.Fatal("precondition: expected namespace to be cached")
 	}
 
-	w.applyPatch(tenantPatch{tenantID: "t1", clearDisplayName: true, revision: "2"})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", clearData: true, revision: "2"})
 
-	if w.appCache.Get("t1") != nil {
-		t.Error("expected tenant to be removed once all fields are empty")
+	if w.appCache.Get("ns1") != nil {
+		t.Error("expected namespace to be removed once all sources are cleared")
 	}
 }
 
 func TestApplyPatch_RevisionOnlyUpdatesWhenNonEmpty(t *testing.T) {
 	w := newTestWatcher(t)
-	name := "Arasaka"
-	w.applyPatch(tenantPatch{tenantID: "t1", displayName: &name, revision: "1"})
-	w.applyPatch(tenantPatch{tenantID: "t1", displayName: &name, revision: ""})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{"LOG_LEVEL": "info"}, revision: "1"})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{"LOG_LEVEL": "debug"}, revision: ""})
 
-	state := w.appCache.Get("t1")
-	if state.Revision != "1" {
-		t.Errorf("Revision: got %q, want retained %q", state.Revision, "1")
+	entry := w.appCache.Get("ns1")
+	if entry.Revision != "1" {
+		t.Errorf("Revision: got %q, want retained %q", entry.Revision, "1")
 	}
 }
 
 func TestApplyPatch_UpdatedAtDefaultsToNowWhenZero(t *testing.T) {
 	w := newTestWatcher(t)
 	before := time.Now().UTC()
-	name := "Arasaka"
-	w.applyPatch(tenantPatch{tenantID: "t1", displayName: &name, revision: "1"})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{"LOG_LEVEL": "info"}, revision: "1"})
 	after := time.Now().UTC()
 
-	state := w.appCache.Get("t1")
-	if state.UpdatedAt.Before(before) || state.UpdatedAt.After(after) {
-		t.Errorf("UpdatedAt %v not within [%v, %v]", state.UpdatedAt, before, after)
+	entry := w.appCache.Get("ns1")
+	if entry.UpdatedAt.Before(before) || entry.UpdatedAt.After(after) {
+		t.Errorf("UpdatedAt %v not within [%v, %v]", entry.UpdatedAt, before, after)
 	}
 }
 
 func TestApplyPatch_UpdatedAtUsesExplicitValue(t *testing.T) {
 	w := newTestWatcher(t)
 	explicit := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	name := "Arasaka"
-	w.applyPatch(tenantPatch{tenantID: "t1", displayName: &name, revision: "1", updated: explicit})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{"LOG_LEVEL": "info"}, revision: "1", updated: explicit})
 
-	state := w.appCache.Get("t1")
-	if !state.UpdatedAt.Equal(explicit) {
-		t.Errorf("UpdatedAt: got %v, want %v", state.UpdatedAt, explicit)
-	}
-}
-
-// --- tenantCacheKey ---
-
-func TestTenantCacheKey(t *testing.T) {
-	tests := []struct {
-		name string
-		t    *v1alpha1.Tenant
-		want string
-	}{
-		{"nil tenant", nil, ""},
-		{"tenantID set", &v1alpha1.Tenant{Spec: v1alpha1.TenantSpec{TenantID: "t1"}}, "t1"},
-		{
-			"falls back to status.namespace",
-			&v1alpha1.Tenant{Status: v1alpha1.TenantStatus{Namespace: "tenant-t2"}},
-			"t2",
-		},
-		{
-			"tenantID takes precedence over namespace",
-			&v1alpha1.Tenant{
-				Spec:   v1alpha1.TenantSpec{TenantID: "t1"},
-				Status: v1alpha1.TenantStatus{Namespace: "tenant-t2"},
-			},
-			"t1",
-		},
-		{"both empty", &v1alpha1.Tenant{}, ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tenantCacheKey(tt.t); got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-// --- tenantIDFromNamespace ---
-
-func TestTenantIDFromNamespace(t *testing.T) {
-	tests := []struct {
-		namespace string
-		want      string
-	}{
-		{"tenant-arasaka", "arasaka"},
-		{"", ""},
-		{"arasaka", "arasaka"}, // no "tenant-" prefix: returned unchanged
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.namespace, func(t *testing.T) {
-			if got := tenantIDFromNamespace(tt.namespace); got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
+	entry := w.appCache.Get("ns1")
+	if !entry.UpdatedAt.Equal(explicit) {
+		t.Errorf("UpdatedAt: got %v, want %v", entry.UpdatedAt, explicit)
 	}
 }
 
@@ -259,205 +168,33 @@ func TestToAnyMap(t *testing.T) {
 	}
 }
 
-// --- toCloudResourcesMap ---
+// --- extractConfigMap: direct objects, tombstones, and wrong types ---
 
-func TestToCloudResourcesMap(t *testing.T) {
-	t.Run("all empty returns nil", func(t *testing.T) {
-		if got := toCloudResourcesMap(v1alpha1.CloudResources{}); got != nil {
-			t.Errorf("got %+v, want nil", got)
-		}
-	})
-
-	t.Run("only whitelisted fields are mapped", func(t *testing.T) {
-		got := toCloudResourcesMap(v1alpha1.CloudResources{
-			IdentityPoolID:    "pool-1",
-			IdentityPoolARN:   "arn:pool-1",
-			IdentityClientID:  "client-1", // not in SupportedKeys - must be dropped
-			IdentityDomain:    "arasaka.example",
-			StorageBucketName: "bucket-1",
-			StorageBucketARN:  "arn:bucket-1", // not in SupportedKeys - must be dropped
-		})
-
-		want := map[string]any{
-			"identityPoolID":    "pool-1",
-			"identityPoolARN":   "arn:pool-1",
-			"storageBucketName": "bucket-1",
-		}
-		if len(got) != len(want) {
-			t.Fatalf("got %+v, want %+v", got, want)
-		}
-		for k, v := range want {
-			if got[k] != v {
-				t.Errorf("%s: got %v, want %v", k, got[k], v)
-			}
-		}
-	})
-
-	t.Run("partial fields only include set ones", func(t *testing.T) {
-		got := toCloudResourcesMap(v1alpha1.CloudResources{IdentityPoolID: "pool-1"})
-		if len(got) != 1 || got["identityPoolID"] != "pool-1" {
-			t.Errorf("got %+v", got)
-		}
-	})
-}
-
-// --- toAuthzPolicySnapshot ---
-
-func TestToAuthzPolicySnapshot_Nil(t *testing.T) {
-	if got := toAuthzPolicySnapshot(nil); got != nil {
-		t.Errorf("got %+v, want nil", got)
-	}
-}
-
-func TestToAuthzPolicySnapshot_CopiesFields(t *testing.T) {
-	pol := &v1alpha1.Policy{
-		Spec: v1alpha1.PolicySpec{
-			JWT: v1alpha1.JWTConfig{
-				IssuerAllowList: []string{"https://issuer.example"},
-				SubjectClaim:    "sub",
-				ScopesClaim:     "scp",
-			},
-			Bindings: []v1alpha1.Binding{
-				{Subject: "svc:authz", Permissions: []string{"config:read"}},
-			},
-			RoleBindings: []v1alpha1.RoleBinding{
-				{Role: "admin", Permissions: []string{"config:read", "config:write"}},
-			},
-		},
-	}
-
-	got := toAuthzPolicySnapshot(pol)
-	if got == nil {
-		t.Fatal("got nil")
-	}
-	if len(got.IssuerAllowList) != 1 || got.IssuerAllowList[0] != "https://issuer.example" {
-		t.Errorf("IssuerAllowList: got %+v", got.IssuerAllowList)
-	}
-	if got.SubjectClaim != "sub" || got.ScopesClaim != "scp" {
-		t.Errorf("claims: got subject=%q scopes=%q", got.SubjectClaim, got.ScopesClaim)
-	}
-	if len(got.Bindings) != 1 || got.Bindings[0].Subject != "svc:authz" {
-		t.Errorf("Bindings: got %+v", got.Bindings)
-	}
-	if len(got.RoleBindings) != 1 || got.RoleBindings[0].Role != "admin" {
-		t.Errorf("RoleBindings: got %+v", got.RoleBindings)
-	}
-}
-
-func TestToAuthzPolicySnapshot_DeepCopiesSlices(t *testing.T) {
-	pol := &v1alpha1.Policy{
-		Spec: v1alpha1.PolicySpec{
-			JWT: v1alpha1.JWTConfig{IssuerAllowList: []string{"https://issuer.example"}},
-			Bindings: []v1alpha1.Binding{
-				{Subject: "svc:authz", Permissions: []string{"config:read"}},
-			},
-		},
-	}
-
-	got := toAuthzPolicySnapshot(pol)
-
-	// Mutate the source after snapshotting; the snapshot must be unaffected.
-	pol.Spec.JWT.IssuerAllowList[0] = "mutated"
-	pol.Spec.Bindings[0].Permissions[0] = "mutated"
-
-	if got.IssuerAllowList[0] != "https://issuer.example" {
-		t.Errorf("IssuerAllowList shares backing array with source: got %q", got.IssuerAllowList[0])
-	}
-	if got.Bindings[0].Permissions[0] != "config:read" {
-		t.Errorf("Bindings[0].Permissions shares backing array with source: got %q", got.Bindings[0].Permissions[0])
-	}
-}
-
-// --- extract*: direct objects, tombstones, and wrong types ---
-
-func TestExtractTenant(t *testing.T) {
-	want := &v1alpha1.Tenant{Spec: v1alpha1.TenantSpec{TenantID: "t1"}}
+func TestExtractConfigMap(t *testing.T) {
+	want := &corev1.ConfigMap{Data: map[string]string{"a": "1"}}
 
 	t.Run("direct object", func(t *testing.T) {
-		if got := extractTenant(want); got != want {
+		if got := extractConfigMap(want); got != want {
 			t.Errorf("got %+v, want %+v", got, want)
 		}
 	})
 
 	t.Run("tombstone-wrapped object", func(t *testing.T) {
-		tomb := cache.DeletedFinalStateUnknown{Key: "t1", Obj: want}
-		if got := extractTenant(tomb); got != want {
+		tomb := cache.DeletedFinalStateUnknown{Key: "ns1/cm1", Obj: want}
+		if got := extractConfigMap(tomb); got != want {
 			t.Errorf("got %+v, want %+v", got, want)
 		}
 	})
 
 	t.Run("wrong type returns nil", func(t *testing.T) {
-		if got := extractTenant(&v1alpha1.Policy{}); got != nil {
+		if got := extractConfigMap(&corev1.Namespace{}); got != nil {
 			t.Errorf("got %+v, want nil", got)
 		}
 	})
 
 	t.Run("tombstone wrapping wrong type returns nil", func(t *testing.T) {
-		tomb := cache.DeletedFinalStateUnknown{Key: "t1", Obj: &v1alpha1.Policy{}}
-		if got := extractTenant(tomb); got != nil {
-			t.Errorf("got %+v, want nil", got)
-		}
-	})
-}
-
-func TestExtractTenantConfig(t *testing.T) {
-	want := &v1alpha1.TenantConfig{Spec: v1alpha1.TenantConfigSpec{RuntimeConfig: map[string]string{"a": "1"}}}
-
-	t.Run("direct object", func(t *testing.T) {
-		if got := extractTenantConfig(want); got != want {
-			t.Errorf("got %+v, want %+v", got, want)
-		}
-	})
-
-	t.Run("tombstone-wrapped object", func(t *testing.T) {
-		// Regression guard: extractTenantConfig previously never unwrapped
-		// tombstones, silently dropping TenantConfig deletes delivered via
-		// cache.DeletedFinalStateUnknown.
-		tomb := cache.DeletedFinalStateUnknown{Key: "t1", Obj: want}
-		if got := extractTenantConfig(tomb); got != want {
-			t.Errorf("got %+v, want %+v", got, want)
-		}
-	})
-
-	t.Run("wrong type returns nil", func(t *testing.T) {
-		if got := extractTenantConfig(&v1alpha1.Tenant{}); got != nil {
-			t.Errorf("got %+v, want nil", got)
-		}
-	})
-
-	t.Run("tombstone wrapping wrong type returns nil", func(t *testing.T) {
-		tomb := cache.DeletedFinalStateUnknown{Key: "t1", Obj: &v1alpha1.Tenant{}}
-		if got := extractTenantConfig(tomb); got != nil {
-			t.Errorf("got %+v, want nil", got)
-		}
-	})
-}
-
-func TestExtractPolicy(t *testing.T) {
-	want := &v1alpha1.Policy{Spec: v1alpha1.PolicySpec{JWT: v1alpha1.JWTConfig{SubjectClaim: "sub"}}}
-
-	t.Run("direct object", func(t *testing.T) {
-		if got := extractPolicy(want); got != want {
-			t.Errorf("got %+v, want %+v", got, want)
-		}
-	})
-
-	t.Run("tombstone-wrapped object", func(t *testing.T) {
-		tomb := cache.DeletedFinalStateUnknown{Key: "t1", Obj: want}
-		if got := extractPolicy(tomb); got != want {
-			t.Errorf("got %+v, want %+v", got, want)
-		}
-	})
-
-	t.Run("wrong type returns nil", func(t *testing.T) {
-		if got := extractPolicy(&v1alpha1.Tenant{}); got != nil {
-			t.Errorf("got %+v, want nil", got)
-		}
-	})
-
-	t.Run("tombstone wrapping wrong type returns nil", func(t *testing.T) {
-		tomb := cache.DeletedFinalStateUnknown{Key: "t1", Obj: &v1alpha1.Tenant{}}
-		if got := extractPolicy(tomb); got != nil {
+		tomb := cache.DeletedFinalStateUnknown{Key: "ns1/cm1", Obj: &corev1.Namespace{}}
+		if got := extractConfigMap(tomb); got != nil {
 			t.Errorf("got %+v, want nil", got)
 		}
 	})
@@ -467,24 +204,73 @@ func TestExtractPolicy(t *testing.T) {
 
 func TestUnwrapTombstone(t *testing.T) {
 	t.Run("value tombstone", func(t *testing.T) {
-		inner := &v1alpha1.Tenant{}
-		tomb := cache.DeletedFinalStateUnknown{Key: "t1", Obj: inner}
+		inner := &corev1.ConfigMap{}
+		tomb := cache.DeletedFinalStateUnknown{Key: "ns1/cm1", Obj: inner}
 		if got := unwrapTombstone(tomb); got != inner {
 			t.Errorf("got %+v, want %+v", got, inner)
 		}
 	})
 
 	t.Run("pointer tombstone", func(t *testing.T) {
-		inner := &v1alpha1.Tenant{}
-		tomb := &cache.DeletedFinalStateUnknown{Key: "t1", Obj: inner}
+		inner := &corev1.ConfigMap{}
+		tomb := &cache.DeletedFinalStateUnknown{Key: "ns1/cm1", Obj: inner}
 		if got := unwrapTombstone(tomb); got != inner {
 			t.Errorf("got %+v, want %+v", got, inner)
 		}
 	})
 
 	t.Run("non-tombstone returns nil", func(t *testing.T) {
-		if got := unwrapTombstone(&v1alpha1.Tenant{}); got != nil {
+		if got := unwrapTombstone(&corev1.ConfigMap{}); got != nil {
 			t.Errorf("got %+v, want nil", got)
 		}
 	})
+}
+
+// --- onConfigMapUpsert / onConfigMapDelete ---
+
+func TestOnConfigMapUpsert(t *testing.T) {
+	w := newTestWatcher(t)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: objectMeta("ns1", "cm1", "1"),
+		Data:       map[string]string{"LOG_LEVEL": "info"},
+	}
+
+	w.onConfigMapUpsert(cm)
+
+	entry := w.appCache.Get("ns1")
+	if entry == nil || entry.Sources["cm1"]["LOG_LEVEL"] != "info" {
+		t.Fatalf("got %+v", entry)
+	}
+}
+
+func TestOnConfigMapUpsert_WrongTypeIgnored(t *testing.T) {
+	w := newTestWatcher(t)
+	w.onConfigMapUpsert(&corev1.Namespace{})
+
+	if w.appCache.Len() != 0 {
+		t.Errorf("got %d cached namespaces, want 0", w.appCache.Len())
+	}
+}
+
+func TestOnConfigMapDelete_ClearsOwnSourceOnly(t *testing.T) {
+	w := newTestWatcher(t)
+	w.onConfigMapUpsert(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "cm-a", "1"), Data: map[string]string{"LOG_LEVEL": "info"}})
+	w.onConfigMapUpsert(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "cm-b", "2"), Data: map[string]string{"FEATURE_FLAG": "true"}})
+
+	w.onConfigMapDelete(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "cm-a", "3")})
+
+	entry := w.appCache.Get("ns1")
+	if entry == nil {
+		t.Fatal("expected namespace to remain cached (cm-b still present)")
+	}
+	if _, ok := entry.Sources["cm-a"]; ok {
+		t.Errorf("cm-a should have been cleared: got %+v", entry.Sources)
+	}
+	if entry.Sources["cm-b"]["FEATURE_FLAG"] != "true" {
+		t.Errorf("cm-b should be untouched: got %+v", entry.Sources["cm-b"])
+	}
+}
+
+func objectMeta(namespace, name, resourceVersion string) metav1.ObjectMeta {
+	return metav1.ObjectMeta{Namespace: namespace, Name: name, ResourceVersion: resourceVersion}
 }

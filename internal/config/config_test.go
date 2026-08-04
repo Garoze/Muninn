@@ -12,14 +12,15 @@ func TestNew_Defaults(t *testing.T) {
 		got  any
 		want any
 	}{
-		"GrpcServiceAddr":      {cfg.GrpcServiceAddr, ":5010"},
-		"GrpcProbeAddr":        {cfg.GrpcProbeAddr, ":5011"},
-		"MetricsAddr":          {cfg.MetricsAddr, ":9090"},
-		"OTELExporterEndpoint": {cfg.OTELExporterEndpoint, "localhost:4317"},
-		"TraceSampleRatio":     {cfg.TraceSampleRatio, 0.1},
-		"KubeConfigPath":       {cfg.KubeConfigPath, ""},
-		"CacheEntryTTL":        {cfg.CacheEntryTTL, time.Duration(0)},
-		"StartupTimeout":       {cfg.StartupTimeout, 2 * time.Minute},
+		"GrpcServiceAddr":        {cfg.GrpcServiceAddr, ":5010"},
+		"GrpcProbeAddr":          {cfg.GrpcProbeAddr, ":5011"},
+		"MetricsAddr":            {cfg.MetricsAddr, ":9090"},
+		"OTELExporterEndpoint":   {cfg.OTELExporterEndpoint, "localhost:4317"},
+		"TraceSampleRatio":       {cfg.TraceSampleRatio, 0.1},
+		"KubeConfigPath":         {cfg.KubeConfigPath, ""},
+		"ConfigMapLabelSelector": {cfg.ConfigMapLabelSelector, "muninn.io/config=runtime"},
+		"CacheEntryTTL":          {cfg.CacheEntryTTL, time.Duration(0)},
+		"StartupTimeout":         {cfg.StartupTimeout, 2 * time.Minute},
 	}
 
 	for name, tc := range cases {
@@ -38,6 +39,7 @@ func TestNew_EnvOverrides(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "otel.example:4317")
 	t.Setenv("OTEL_TRACES_SAMPLE_ARG", "0.75")
 	t.Setenv("KUBE_CONFIG_PATH", "/tmp/kubeconfig")
+	t.Setenv("CONFIGMAP_LABEL_SELECTOR", "app.io/config=true")
 	t.Setenv("CACHE_ENTRY_TTL", "30s")
 	t.Setenv("STARTUP_TIMEOUT", "5m")
 
@@ -60,6 +62,9 @@ func TestNew_EnvOverrides(t *testing.T) {
 	}
 	if cfg.KubeConfigPath != "/tmp/kubeconfig" {
 		t.Errorf("KubeConfigPath: got %q", cfg.KubeConfigPath)
+	}
+	if cfg.ConfigMapLabelSelector != "app.io/config=true" {
+		t.Errorf("ConfigMapLabelSelector: got %q", cfg.ConfigMapLabelSelector)
 	}
 	if cfg.CacheEntryTTL != 30*time.Second {
 		t.Errorf("CacheEntryTTL: got %v", cfg.CacheEntryTTL)

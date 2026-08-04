@@ -3,7 +3,6 @@ package grpc
 import (
 	"context"
 	"errors"
-	"sort"
 	"time"
 
 	"go.uber.org/zap"
@@ -33,7 +32,7 @@ const queryMethod = "/discovery.v1.DiscoveryService/Query"
 func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequest) (*discoveryv1.QueryResponse, error) {
 	start := time.Now()
 
-	results, missing, revision, err := h.Service.Query(ctx, req.TenantId, req.Keys, req.Strict)
+	results, missing, revision, err := h.Service.Query(ctx, req.Namespace, req.Keys, req.Strict)
 
 	h.Metrics.QueryDuration.WithLabelValues("query").Observe(time.Since(start).Seconds())
 
@@ -47,7 +46,7 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 		h.Metrics.QueriesTotal.WithLabelValues(c.resultLabel, c.codelabel).Inc()
 		h.Logger.Error("query failed",
 			zap.String("method", queryMethod),
-			zap.String("tenant_id", req.TenantId),
+			zap.String("namespace", req.Namespace),
 			zap.Int("keys_count", len(req.Keys)),
 			zap.String("grpc_code", c.codelabel),
 			zap.Error(err),
@@ -62,7 +61,7 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 			h.Metrics.QueriesTotal.WithLabelValues("internal", "Internal").Inc()
 			h.Logger.Error("failed to serialize query results",
 				zap.String("method", queryMethod),
-				zap.String("tenant_id", req.TenantId),
+				zap.String("namespace", req.Namespace),
 				zap.String("key", r.Key),
 				zap.Error(convErr),
 			)
@@ -79,7 +78,7 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 	h.Metrics.QueriesTotal.WithLabelValues("success", "OK").Inc()
 	h.Logger.Info("query completed",
 		zap.String("method", queryMethod),
-		zap.String("tenant_id", req.TenantId),
+		zap.String("namespace", req.Namespace),
 		zap.Int("keys_count", len(req.Keys)),
 	)
 
@@ -90,29 +89,20 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 	}, nil
 }
 
-// Describe returns all supported keys with type hints and descriptions,
-// sorted alphabetically. Source of truth in the app-layer SupportedKeys map.
+// Describe returns the active config sources. Source of truth is the
+// app-layer DiscoveryService.Describe().
 func (h *DiscoveryHandler) Describe(_ context.Context, _ *discoveryv1.DescribeRequest) (*discoveryv1.DescribeResponse, error) {
-	keys := make([]string, 0, len(app.SupportedKeys))
-	for k := range app.SupportedKeys {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	sources := h.Service.Describe()
 
 	resp := &discoveryv1.DescribeResponse{
-		SupportedKeys: make([]*discoveryv1.SupportedKey, 0, len(keys)),
+		Sources: make([]*discoveryv1.ConfigSource, 0, len(sources)),
 	}
 
-	for _, k := range keys {
-		desc, ok := app.SupportedKeyDescriptions[k]
-		if !ok {
-			desc = "no description provided"
-		}
-
-		resp.SupportedKeys = append(resp.SupportedKeys, &discoveryv1.SupportedKey{
-			Key:         k,
-			TypeHint:    app.SupportedKeys[k],
-			Description: desc,
+	for _, s := range sources {
+		resp.Sources = append(resp.Sources, &discoveryv1.ConfigSource{
+			Kind:          s.Kind,
+			LabelSelector: s.LabelSelector,
+			Scope:         s.Scope,
 		})
 	}
 	return resp, nil
@@ -128,10 +118,9 @@ type errorClassification struct {
 
 func classifyError(err error) errorClassification {
 	switch {
-	case errors.Is(err, app.ErrTenantNotFound):
+	case errors.Is(err, app.ErrNamespaceNotFound):
 		return errorClassification{"not_found", "NotFound", codes.NotFound}
-	case errors.Is(err, app.ErrUnsupportedKey),
-		errors.Is(err, app.ErrTenantIDRequired),
+	case errors.Is(err, app.ErrNamespaceRequired),
 		errors.Is(err, app.ErrStrictMissingKeys):
 		return errorClassification{"invalid_argument", "InvalidArgument", codes.InvalidArgument}
 	case errors.Is(err, app.ErrCacheNotSynced),

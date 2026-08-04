@@ -6,23 +6,23 @@ option go_package = "github.com/garoze/muninn/gen/discovery/v1;discoveryv1";
 
 import "google/protobuf/struct.proto";
 
-// DiscoveryService provides tenant-scoped runtime configuration lookup.
+// DiscoveryService provides namespace-scoped runtime configuration lookup.
 //
-// Watches Tenant, TenantConfig, and Policy CRDs via controller-runtime
-// informers, maintains a patch-based in-memory cache keyed by tenant ID,
-// and serves only whitelisted configuration keys.
+// Watches Kubernetes ConfigMaps (and, optionally, other registered config
+// sources) via controller-runtime informers, maintains a patch-based
+// in-memory cache keyed by namespace, and serves whatever keys are present
+// in the resolved configuration.
 service DiscoveryService {
-  // Query returns configuration values for specified tenant and keys.
+  // Query returns configuration values for the specified namespace and keys.
   rpc Query(QueryRequest) returns (QueryResponse);
 
-  // Describe list all supported configuration keys and their value types.
+  // Describe lists the active configuration sources.
   rpc Describe(DescribeRequest) returns (DescribeResponse);
 }
 
 message QueryRequest {
-  string tenant_id = 1; // REQUIRED. Tenant identifier.
-  repeated string keys =
-      2;           // REQUIRED. Keys to fetch (dot-separated, whitelisted).
+  string namespace = 1; // REQUIRED. Namespace to resolve configuration for.
+  repeated string keys = 2; // REQUIRED. Keys to fetch.
   bool strict = 3; // If true, any missing key returns InvalidArgument.
 }
 
@@ -36,15 +36,15 @@ message QueryResponse {
 message KeyValue {
   string key = 1;
   google.protobuf.Value value = 2;
-  string source = 3; // Which CRD field this value was resolved from.
+  string source = 3; // Which config source (e.g. ConfigMap name) this value was resolved from.
 }
 
 message DescribeRequest {}
 
-message DescribeResponse { repeated SupportedKey supported_keys = 1; }
+message DescribeResponse { repeated ConfigSource sources = 1; }
 
-message SupportedKey {
-  string key = 1;
-  string type_hint = 2; // "string", "array", "object"
-  string description = 3;
+message ConfigSource {
+  string kind = 1;           // e.g. "ConfigMap"
+  string label_selector = 2; // Selector scoping which objects are watched.
+  string scope = 3;          // e.g. "namespace"
 }

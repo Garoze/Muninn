@@ -26,8 +26,8 @@ func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `muninnctl is a CLI client for Muninn's gRPC Query API.
 
 Commands:
-  query      Query configuration values for a tenant
-  describe   List supported configuration keys
+  query      Query configuration values for a namespace
+  describe   List the active configuration sources
 
 Usage:
   muninnctl [flags] [command]
@@ -77,9 +77,9 @@ func main() {
 
 func cmdQuery(args []string) error {
 	fs := pflag.NewFlagSet("query", pflag.ExitOnError)
-	setFlagUsage(fs, "query", "Query configuration values for a tenant.")
+	setFlagUsage(fs, "query", "Query configuration values for a namespace.")
 	addr := fs.StringP("addr", "a", defaultAddr, "muninn gRPC address (host:port)")
-	tenant := fs.StringP("tenant", "t", "", "tenant ID (required)")
+	namespace := fs.StringP("namespace", "n", "", "namespace (required)")
 	keys := fs.StringP("keys", "k", "", "comma-separated keys (required)")
 	strict := fs.BoolP("strict", "s", false, "return InvalidArgument if any key is missing")
 
@@ -87,8 +87,8 @@ func cmdQuery(args []string) error {
 		return err
 	}
 
-	if *tenant == "" || *keys == "" {
-		return fmt.Errorf("--tenant and --keys are required (see 'muninnctl query -h')")
+	if *namespace == "" || *keys == "" {
+		return fmt.Errorf("--namespace and --keys are required (see 'muninnctl query -h')")
 	}
 
 	conn, err := dial(*addr)
@@ -105,9 +105,9 @@ func cmdQuery(args []string) error {
 	defer cancel()
 
 	resp, err := discoveryv1.NewDiscoveryServiceClient(conn).Query(ctx, &discoveryv1.QueryRequest{
-		TenantId: *tenant,
-		Keys:     strings.Split(*keys, ","),
-		Strict:   *strict,
+		Namespace: *namespace,
+		Keys:      strings.Split(*keys, ","),
+		Strict:    *strict,
 	})
 
 	if err != nil {
@@ -119,7 +119,7 @@ func cmdQuery(args []string) error {
 
 func cmdDescribe(args []string) error {
 	fs := pflag.NewFlagSet("describe", pflag.ExitOnError)
-	setFlagUsage(fs, "describe", "List supported configuration keys.")
+	setFlagUsage(fs, "describe", "List the active configuration sources.")
 	addr := fs.StringP("addr", "a", defaultAddr, "muninn gRPC address (host:port)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -189,17 +189,17 @@ func formatQueryResponse(w io.Writer, resp *discoveryv1.QueryResponse) error {
 	return nil
 }
 
-// formatDescribeResponse writes supported keys as tab-aligned columns to w.
-// Extracted so it can be unit-tested without a live server. See
+// formatDescribeResponse writes active config sources as tab-aligned columns
+// to w. Extracted so it can be unit-tested without a live server. See
 // formatQueryResponse for why writes into tw are unchecked.
 func formatDescribeResponse(w io.Writer, resp *discoveryv1.DescribeResponse) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "KEY\tTYPE\tDESCRIPTION")
-	for _, k := range resp.GetSupportedKeys() {
+	_, _ = fmt.Fprintln(tw, "KIND\tLABEL SELECTOR\tSCOPE")
+	for _, s := range resp.GetSources() {
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n",
-			k.GetKey(),
-			k.GetTypeHint(),
-			k.GetDescription(),
+			s.GetKind(),
+			s.GetLabelSelector(),
+			s.GetScope(),
 		)
 	}
 	return tw.Flush()

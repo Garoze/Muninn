@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
-	"sort"
 	"testing"
 	"time"
 
@@ -25,7 +23,7 @@ func newTestHandler(t *testing.T) *DiscoveryHandler {
 	t.Helper()
 	log := zap.NewNop()
 	return &DiscoveryHandler{
-		Service: app.NewDiscoveryService(&config.Config{}, log),
+		Service: app.NewDiscoveryService(&config.Config{ConfigMapLabelSelector: "muninn.io/config=runtime"}, log),
 		Metrics: observability.NewMetrics(prometheus.NewRegistry()),
 		Logger:  log,
 	}
@@ -37,8 +35,8 @@ func TestQuery_CacheNotSynced(t *testing.T) {
 	h := newTestHandler(t)
 
 	_, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"TENANT.id"},
+		Namespace: "ns1",
+		Keys:      []string{"LOG_LEVEL"},
 	})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("got %v, want Unavailable", err)
@@ -48,11 +46,15 @@ func TestQuery_CacheNotSynced(t *testing.T) {
 func TestQuery_Success(t *testing.T) {
 	h := newTestHandler(t)
 	h.Service.Cache.SetSynced()
-	h.Service.Cache.Set(&app.TenantState{TenantID: "t1", DisplayName: "Test", Revision: "1"})
+	h.Service.Cache.Set(&app.ConfigEntry{
+		Namespace: "ns1",
+		Sources:   map[string]map[string]any{"cm1": {"LOG_LEVEL": "info", "FEATURE_FLAG": "true"}},
+		Revision:  "1",
+	})
 
 	resp, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"TENANT.id", "TENANT.displayName"},
+		Namespace: "ns1",
+		Keys:      []string{"LOG_LEVEL", "FEATURE_FLAG"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -68,69 +70,55 @@ func TestQuery_Success(t *testing.T) {
 func TestQuery_MissingKeysNonStrict(t *testing.T) {
 	h := newTestHandler(t)
 	h.Service.Cache.SetSynced()
-	h.Service.Cache.Set(&app.TenantState{TenantID: "t1", Revision: "1"})
+	h.Service.Cache.Set(&app.ConfigEntry{Namespace: "ns1", Sources: map[string]map[string]any{"cm1": {}}, Revision: "1"})
 
 	resp, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"TENANT.runtime"},
-		Strict:   false,
+		Namespace: "ns1",
+		Keys:      []string{"LOG_LEVEL"},
+		Strict:    false,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.MissingKeys) != 1 || resp.MissingKeys[0] != "TENANT.runtime" {
-		t.Errorf("missing_keys: got %v, want [TENANT.runtime]", resp.MissingKeys)
+	if len(resp.MissingKeys) != 1 || resp.MissingKeys[0] != "LOG_LEVEL" {
+		t.Errorf("missing_keys: got %v, want [LOG_LEVEL]", resp.MissingKeys)
 	}
 }
 
 func TestQuery_StrictMissingMapsToInvalidArgument(t *testing.T) {
 	h := newTestHandler(t)
 	h.Service.Cache.SetSynced()
-	h.Service.Cache.Set(&app.TenantState{TenantID: "t1", Revision: "1"})
+	h.Service.Cache.Set(&app.ConfigEntry{Namespace: "ns1", Sources: map[string]map[string]any{"cm1": {}}, Revision: "1"})
 
 	_, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"AUTHZ.jwt.subjectClaim"},
-		Strict:   true,
+		Namespace: "ns1",
+		Keys:      []string{"LOG_LEVEL"},
+		Strict:    true,
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("got %v, want InvalidArgument", err)
 	}
 }
 
-func TestQuery_TenantNotFoundMapsToNotFound(t *testing.T) {
+func TestQuery_NamespaceNotFoundMapsToNotFound(t *testing.T) {
 	h := newTestHandler(t)
 	h.Service.Cache.SetSynced()
 
 	_, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "missing",
-		Keys:     []string{"TENANT.id"},
+		Namespace: "missing",
+		Keys:      []string{"LOG_LEVEL"},
 	})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("got %v, want NotFound", err)
 	}
 }
 
-func TestQuery_UnsupportedKeyMapsToInvalidArgument(t *testing.T) {
-	h := newTestHandler(t)
-	h.Service.Cache.SetSynced()
-	h.Service.Cache.Set(&app.TenantState{TenantID: "t1", Revision: "1"})
-
-	_, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"NOT.a.key"},
-	})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("got %v, want InvalidArgument", err)
-	}
-}
-
-func TestQuery_EmptyTenantIDMapsToInvalidArgument(t *testing.T) {
+func TestQuery_EmptyNamespaceMapsToInvalidArgument(t *testing.T) {
 	h := newTestHandler(t)
 	h.Service.Cache.SetSynced()
 
 	_, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		Keys: []string{"TENANT.id"},
+		Keys: []string{"LOG_LEVEL"},
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("got %v, want InvalidArgument", err)
@@ -140,45 +128,20 @@ func TestQuery_EmptyTenantIDMapsToInvalidArgument(t *testing.T) {
 func TestQuery_UnserializableValueMapsToInternal(t *testing.T) {
 	h := newTestHandler(t)
 	h.Service.Cache.SetSynced()
-	h.Service.Cache.Set(&app.TenantState{
-		TenantID: "t1",
-		Revision: "1",
+	h.Service.Cache.Set(&app.ConfigEntry{
+		Namespace: "ns1",
+		Revision:  "1",
 		// structpb.NewValue cannot represent a channel; this forces the
 		// handler's serialization-failure branch.
-		RuntimeConfig: map[string]any{"bad": make(chan int)},
+		Sources: map[string]map[string]any{"cm1": {"bad": make(chan int)}},
 	})
 
 	_, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"TENANT.runtime"},
+		Namespace: "ns1",
+		Keys:      []string{"bad"},
 	})
 	if status.Code(err) != codes.Internal {
 		t.Fatalf("got %v, want Internal", err)
-	}
-}
-
-func TestQuery_AuthzBindingsSerialization(t *testing.T) {
-	h := newTestHandler(t)
-	h.Service.Cache.SetSynced()
-	h.Service.Cache.Set(&app.TenantState{
-		TenantID: "t1",
-		Revision: "1",
-		AuthzPolicy: &app.AuthzPolicySnapshot{
-			Bindings: []app.AuthzBindingSnapshot{
-				{Subject: "admin@example.com", Permissions: []string{"read", "write"}},
-			},
-		},
-	})
-
-	resp, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"AUTHZ.bindings"},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(resp.Values) != 1 || resp.Values[0].GetValue().GetListValue() == nil {
-		t.Fatalf("expected list value for AUTHZ.bindings, got %+v", resp.Values)
 	}
 }
 
@@ -187,8 +150,8 @@ func TestQuery_MetricsRecordedOnSuccessAndFailure(t *testing.T) {
 
 	// Failure: cache not synced -> unavailable/Unavailable.
 	_, _ = h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"TENANT.id"},
+		Namespace: "ns1",
+		Keys:      []string{"LOG_LEVEL"},
 	})
 	if got := testutil.ToFloat64(h.Metrics.QueriesTotal.WithLabelValues("unavailable", "Unavailable")); got != 1 {
 		t.Fatalf("unavailable metric: got %v, want 1", got)
@@ -196,10 +159,10 @@ func TestQuery_MetricsRecordedOnSuccessAndFailure(t *testing.T) {
 
 	// Success.
 	h.Service.Cache.SetSynced()
-	h.Service.Cache.Set(&app.TenantState{TenantID: "t1", Revision: "1"})
+	h.Service.Cache.Set(&app.ConfigEntry{Namespace: "ns1", Sources: map[string]map[string]any{"cm1": {"LOG_LEVEL": "info"}}, Revision: "1"})
 	_, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"TENANT.id"},
+		Namespace: "ns1",
+		Keys:      []string{"LOG_LEVEL"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -213,15 +176,16 @@ func TestQuery_StaleCacheIncrementsStaleMetric(t *testing.T) {
 	h := newTestHandler(t)
 	h.Service = app.NewDiscoveryService(&config.Config{CacheEntryTTL: time.Millisecond}, zap.NewNop())
 	h.Service.Cache.SetSynced()
-	h.Service.Cache.Set(&app.TenantState{
-		TenantID:  "t1",
+	h.Service.Cache.Set(&app.ConfigEntry{
+		Namespace: "ns1",
+		Sources:   map[string]map[string]any{"cm1": {"LOG_LEVEL": "info"}},
 		Revision:  "1",
 		UpdatedAt: time.Now().Add(-time.Hour),
 	})
 
 	_, err := h.Query(context.Background(), &discoveryv1.QueryRequest{
-		TenantId: "t1",
-		Keys:     []string{"TENANT.id"},
+		Namespace: "ns1",
+		Keys:      []string{"LOG_LEVEL"},
 	})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("got %v, want Unavailable", err)
@@ -240,65 +204,18 @@ func TestDescribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.SupportedKeys) != len(app.SupportedKeys) {
-		t.Errorf("got %d keys, want %d", len(resp.SupportedKeys), len(app.SupportedKeys))
+	if len(resp.Sources) != 1 {
+		t.Fatalf("got %d sources, want 1", len(resp.Sources))
 	}
-
-	found := false
-	for _, k := range resp.SupportedKeys {
-		if k.GetKey() == "TENANT.id" {
-			found = true
-			if k.GetTypeHint() != "string" {
-				t.Errorf("TENANT.id type_hint: got %q, want %q", k.GetTypeHint(), "string")
-			}
-		}
+	if resp.Sources[0].GetKind() != "ConfigMap" {
+		t.Errorf("kind: got %q, want ConfigMap", resp.Sources[0].GetKind())
 	}
-	if !found {
-		t.Error("expected TENANT.id in supported keys")
+	if resp.Sources[0].GetLabelSelector() != "muninn.io/config=runtime" {
+		t.Errorf("label_selector: got %q, want muninn.io/config=runtime", resp.Sources[0].GetLabelSelector())
 	}
-}
-
-func TestDescribe_SupportedKeysAreSorted(t *testing.T) {
-	h := newTestHandler(t)
-
-	resp, err := h.Describe(context.Background(), &discoveryv1.DescribeRequest{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if resp.Sources[0].GetScope() != "namespace" {
+		t.Errorf("scope: got %q, want namespace", resp.Sources[0].GetScope())
 	}
-
-	keys := make([]string, 0, len(resp.SupportedKeys))
-	for _, k := range resp.SupportedKeys {
-		keys = append(keys, k.GetKey())
-	}
-
-	want := append([]string(nil), keys...)
-	sort.Strings(want)
-	if !reflect.DeepEqual(keys, want) {
-		t.Fatalf("not sorted\n got: %v\nwant: %v", keys, want)
-	}
-}
-
-func TestDescribe_MissingDescriptionUsesFallback(t *testing.T) {
-	const tempKey = "TENANT.test.missingDescription"
-	app.SupportedKeys[tempKey] = "string"
-	t.Cleanup(func() { delete(app.SupportedKeys, tempKey) })
-
-	h := newTestHandler(t)
-
-	resp, err := h.Describe(context.Background(), &discoveryv1.DescribeRequest{})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	for _, k := range resp.SupportedKeys {
-		if k.GetKey() == tempKey {
-			if k.GetDescription() != "no description provided" {
-				t.Errorf("got %q, want fallback description", k.GetDescription())
-			}
-			return
-		}
-	}
-	t.Fatalf("expected temp key %q in response", tempKey)
 }
 
 // --- classifyError ---
@@ -311,9 +228,8 @@ func TestClassifyError(t *testing.T) {
 		wantCode   string
 		wantGRPC   codes.Code
 	}{
-		{"tenant not found", app.ErrTenantNotFound, "not_found", "NotFound", codes.NotFound},
-		{"unsupported key", app.ErrUnsupportedKey, "invalid_argument", "InvalidArgument", codes.InvalidArgument},
-		{"tenant id required", app.ErrTenantIDRequired, "invalid_argument", "InvalidArgument", codes.InvalidArgument},
+		{"namespace not found", app.ErrNamespaceNotFound, "not_found", "NotFound", codes.NotFound},
+		{"namespace required", app.ErrNamespaceRequired, "invalid_argument", "InvalidArgument", codes.InvalidArgument},
 		{"strict missing keys", app.ErrStrictMissingKeys, "invalid_argument", "InvalidArgument", codes.InvalidArgument},
 		{"cache not synced", app.ErrCacheNotSynced, "unavailable", "Unavailable", codes.Unavailable},
 		{"stale cache entry", app.ErrCacheEntryStale, "unavailable", "Unavailable", codes.Unavailable},
@@ -333,7 +249,7 @@ func TestClassifyError(t *testing.T) {
 }
 
 func TestClassifyError_WrappedSentinel(t *testing.T) {
-	wrapped := fmt.Errorf("query failed: %w", app.ErrTenantNotFound)
+	wrapped := fmt.Errorf("query failed: %w", app.ErrNamespaceNotFound)
 	got := classifyError(wrapped)
 	if got.resultLabel != "not_found" || got.grpcCode != codes.NotFound {
 		t.Errorf("wrapped sentinel not classified: got %+v", got)

@@ -24,9 +24,9 @@ const (
 
 type QueryRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TenantId      string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"` // REQUIRED. Tenant identifier.
-	Keys          []string               `protobuf:"bytes,2,rep,name=keys,proto3" json:"keys,omitempty"`                         // REQUIRED. Keys to fetch (dot-separated, whitelisted).
-	Strict        bool                   `protobuf:"varint,3,opt,name=strict,proto3" json:"strict,omitempty"`                    // If true, any missing key returns InvalidArgument.
+	Namespace     string                 `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"` // REQUIRED. Namespace to resolve configuration for.
+	Keys          []string               `protobuf:"bytes,2,rep,name=keys,proto3" json:"keys,omitempty"`           // REQUIRED. Keys to fetch.
+	Strict        bool                   `protobuf:"varint,3,opt,name=strict,proto3" json:"strict,omitempty"`      // If true, any missing key returns InvalidArgument.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -61,9 +61,9 @@ func (*QueryRequest) Descriptor() ([]byte, []int) {
 	return file_discovery_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *QueryRequest) GetTenantId() string {
+func (x *QueryRequest) GetNamespace() string {
 	if x != nil {
-		return x.TenantId
+		return x.Namespace
 	}
 	return ""
 }
@@ -146,7 +146,7 @@ type KeyValue struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	Value         *structpb.Value        `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // Which CRD field this value was resolved from.
+	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // Which config source (e.g. ConfigMap name) this value was resolved from.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -240,7 +240,7 @@ func (*DescribeRequest) Descriptor() ([]byte, []int) {
 
 type DescribeResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SupportedKeys []*SupportedKey        `protobuf:"bytes,1,rep,name=supported_keys,json=supportedKeys,proto3" json:"supported_keys,omitempty"`
+	Sources       []*ConfigSource        `protobuf:"bytes,1,rep,name=sources,proto3" json:"sources,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -275,36 +275,36 @@ func (*DescribeResponse) Descriptor() ([]byte, []int) {
 	return file_discovery_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *DescribeResponse) GetSupportedKeys() []*SupportedKey {
+func (x *DescribeResponse) GetSources() []*ConfigSource {
 	if x != nil {
-		return x.SupportedKeys
+		return x.Sources
 	}
 	return nil
 }
 
-type SupportedKey struct {
+type ConfigSource struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	TypeHint      string                 `protobuf:"bytes,2,opt,name=type_hint,json=typeHint,proto3" json:"type_hint,omitempty"` // "string", "array", "object"
-	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`                                        // e.g. "ConfigMap"
+	LabelSelector string                 `protobuf:"bytes,2,opt,name=label_selector,json=labelSelector,proto3" json:"label_selector,omitempty"` // Selector scoping which objects are watched.
+	Scope         string                 `protobuf:"bytes,3,opt,name=scope,proto3" json:"scope,omitempty"`                                      // e.g. "namespace"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SupportedKey) Reset() {
-	*x = SupportedKey{}
+func (x *ConfigSource) Reset() {
+	*x = ConfigSource{}
 	mi := &file_discovery_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SupportedKey) String() string {
+func (x *ConfigSource) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SupportedKey) ProtoMessage() {}
+func (*ConfigSource) ProtoMessage() {}
 
-func (x *SupportedKey) ProtoReflect() protoreflect.Message {
+func (x *ConfigSource) ProtoReflect() protoreflect.Message {
 	mi := &file_discovery_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -316,28 +316,28 @@ func (x *SupportedKey) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SupportedKey.ProtoReflect.Descriptor instead.
-func (*SupportedKey) Descriptor() ([]byte, []int) {
+// Deprecated: Use ConfigSource.ProtoReflect.Descriptor instead.
+func (*ConfigSource) Descriptor() ([]byte, []int) {
 	return file_discovery_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *SupportedKey) GetKey() string {
+func (x *ConfigSource) GetKind() string {
 	if x != nil {
-		return x.Key
+		return x.Kind
 	}
 	return ""
 }
 
-func (x *SupportedKey) GetTypeHint() string {
+func (x *ConfigSource) GetLabelSelector() string {
 	if x != nil {
-		return x.TypeHint
+		return x.LabelSelector
 	}
 	return ""
 }
 
-func (x *SupportedKey) GetDescription() string {
+func (x *ConfigSource) GetScope() string {
 	if x != nil {
-		return x.Description
+		return x.Scope
 	}
 	return ""
 }
@@ -346,9 +346,9 @@ var File_discovery_proto protoreflect.FileDescriptor
 
 const file_discovery_proto_rawDesc = "" +
 	"\n" +
-	"\x0fdiscovery.proto\x12\fdiscovery.v1\x1a\x1cgoogle/protobuf/struct.proto\"W\n" +
-	"\fQueryRequest\x12\x1b\n" +
-	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x12\n" +
+	"\x0fdiscovery.proto\x12\fdiscovery.v1\x1a\x1cgoogle/protobuf/struct.proto\"X\n" +
+	"\fQueryRequest\x12\x1c\n" +
+	"\tnamespace\x18\x01 \x01(\tR\tnamespace\x12\x12\n" +
 	"\x04keys\x18\x02 \x03(\tR\x04keys\x12\x16\n" +
 	"\x06strict\x18\x03 \x01(\bR\x06strict\"~\n" +
 	"\rQueryResponse\x12.\n" +
@@ -359,13 +359,13 @@ const file_discovery_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value\x12\x16\n" +
 	"\x06source\x18\x03 \x01(\tR\x06source\"\x11\n" +
-	"\x0fDescribeRequest\"U\n" +
-	"\x10DescribeResponse\x12A\n" +
-	"\x0esupported_keys\x18\x01 \x03(\v2\x1a.discovery.v1.SupportedKeyR\rsupportedKeys\"_\n" +
-	"\fSupportedKey\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x1b\n" +
-	"\ttype_hint\x18\x02 \x01(\tR\btypeHint\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription2\x9f\x01\n" +
+	"\x0fDescribeRequest\"H\n" +
+	"\x10DescribeResponse\x124\n" +
+	"\asources\x18\x01 \x03(\v2\x1a.discovery.v1.ConfigSourceR\asources\"_\n" +
+	"\fConfigSource\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12%\n" +
+	"\x0elabel_selector\x18\x02 \x01(\tR\rlabelSelector\x12\x14\n" +
+	"\x05scope\x18\x03 \x01(\tR\x05scope2\x9f\x01\n" +
 	"\x10DiscoveryService\x12@\n" +
 	"\x05Query\x12\x1a.discovery.v1.QueryRequest\x1a\x1b.discovery.v1.QueryResponse\x12I\n" +
 	"\bDescribe\x12\x1d.discovery.v1.DescribeRequest\x1a\x1e.discovery.v1.DescribeResponseB7Z5github.com/garoze/muninn/gen/discovery/v1;discoveryv1b\x06proto3"
@@ -389,13 +389,13 @@ var file_discovery_proto_goTypes = []any{
 	(*KeyValue)(nil),         // 2: discovery.v1.KeyValue
 	(*DescribeRequest)(nil),  // 3: discovery.v1.DescribeRequest
 	(*DescribeResponse)(nil), // 4: discovery.v1.DescribeResponse
-	(*SupportedKey)(nil),     // 5: discovery.v1.SupportedKey
+	(*ConfigSource)(nil),     // 5: discovery.v1.ConfigSource
 	(*structpb.Value)(nil),   // 6: google.protobuf.Value
 }
 var file_discovery_proto_depIdxs = []int32{
 	2, // 0: discovery.v1.QueryResponse.values:type_name -> discovery.v1.KeyValue
 	6, // 1: discovery.v1.KeyValue.value:type_name -> google.protobuf.Value
-	5, // 2: discovery.v1.DescribeResponse.supported_keys:type_name -> discovery.v1.SupportedKey
+	5, // 2: discovery.v1.DescribeResponse.sources:type_name -> discovery.v1.ConfigSource
 	0, // 3: discovery.v1.DiscoveryService.Query:input_type -> discovery.v1.QueryRequest
 	3, // 4: discovery.v1.DiscoveryService.Describe:input_type -> discovery.v1.DescribeRequest
 	1, // 5: discovery.v1.DiscoveryService.Query:output_type -> discovery.v1.QueryResponse

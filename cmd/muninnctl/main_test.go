@@ -20,16 +20,16 @@ func (errWriter) Write(p []byte) (int, error) {
 }
 
 func TestFormatQueryResponse(t *testing.T) {
-	value, err := structpb.NewValue("acme-corp")
+	value, err := structpb.NewValue("info")
 	if err != nil {
 		t.Fatalf("structpb.NewValue: %v", err)
 	}
 
 	resp := &discoveryv1.QueryResponse{
 		Values: []*discoveryv1.KeyValue{
-			{Key: "TENANT.id", Value: value, Source: "Tenant"},
+			{Key: "LOG_LEVEL", Value: value, Source: "runtime-config"},
 		},
-		MissingKeys: []string{"TENANT.displayName"},
+		MissingKeys: []string{"FEATURE_FLAG"},
 	}
 
 	var buf bytes.Buffer
@@ -38,10 +38,10 @@ func TestFormatQueryResponse(t *testing.T) {
 	}
 	out := buf.String()
 
-	if !strings.Contains(out, "TENANT.id") || !strings.Contains(out, "acme-corp") || !strings.Contains(out, "Tenant") {
+	if !strings.Contains(out, "LOG_LEVEL") || !strings.Contains(out, "info") || !strings.Contains(out, "runtime-config") {
 		t.Errorf("expected value row in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "missing: TENANT.displayName") {
+	if !strings.Contains(out, "missing: FEATURE_FLAG") {
 		t.Errorf("expected missing keys line in output, got:\n%s", out)
 	}
 }
@@ -62,8 +62,8 @@ func TestFormatQueryResponse_NoMissingKeys(t *testing.T) {
 
 func TestFormatDescribeResponse(t *testing.T) {
 	resp := &discoveryv1.DescribeResponse{
-		SupportedKeys: []*discoveryv1.SupportedKey{
-			{Key: "TENANT.id", TypeHint: "string", Description: "Tenant identifier"},
+		Sources: []*discoveryv1.ConfigSource{
+			{Kind: "ConfigMap", LabelSelector: "muninn.io/config=runtime", Scope: "namespace"},
 		},
 	}
 
@@ -73,14 +73,14 @@ func TestFormatDescribeResponse(t *testing.T) {
 	}
 	out := buf.String()
 
-	if !strings.Contains(out, "TENANT.id") || !strings.Contains(out, "string") || !strings.Contains(out, "Tenant identifier") {
-		t.Errorf("expected supported key row in output, got:\n%s", out)
+	if !strings.Contains(out, "ConfigMap") || !strings.Contains(out, "muninn.io/config=runtime") || !strings.Contains(out, "namespace") {
+		t.Errorf("expected source row in output, got:\n%s", out)
 	}
 }
 
 func TestFormatQueryResponse_WriteError(t *testing.T) {
 	resp := &discoveryv1.QueryResponse{
-		Values: []*discoveryv1.KeyValue{{Key: "TENANT.id", Source: "Tenant"}},
+		Values: []*discoveryv1.KeyValue{{Key: "LOG_LEVEL", Source: "runtime-config"}},
 	}
 
 	if err := formatQueryResponse(errWriter{}, resp); err == nil {
@@ -90,7 +90,7 @@ func TestFormatQueryResponse_WriteError(t *testing.T) {
 
 func TestFormatDescribeResponse_WriteError(t *testing.T) {
 	resp := &discoveryv1.DescribeResponse{
-		SupportedKeys: []*discoveryv1.SupportedKey{{Key: "TENANT.id"}},
+		Sources: []*discoveryv1.ConfigSource{{Kind: "ConfigMap"}},
 	}
 
 	if err := formatDescribeResponse(errWriter{}, resp); err == nil {
@@ -104,17 +104,17 @@ func TestCmdQuery_MissingRequiredFlags(t *testing.T) {
 		args []string
 	}{
 		{"no flags", nil},
-		{"tenant only", []string{"--tenant", "arasaka"}},
-		{"keys only", []string{"--keys", "TENANT.id"}},
+		{"namespace only", []string{"--namespace", "arasaka"}},
+		{"keys only", []string{"--keys", "LOG_LEVEL"}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := cmdQuery(tt.args)
 			if err == nil {
-				t.Fatal("expected an error for missing --tenant/--keys, got nil")
+				t.Fatal("expected an error for missing --namespace/--keys, got nil")
 			}
-			if !strings.Contains(err.Error(), "--tenant and --keys are required") {
+			if !strings.Contains(err.Error(), "--namespace and --keys are required") {
 				t.Errorf("unexpected error message: %v", err)
 			}
 		})

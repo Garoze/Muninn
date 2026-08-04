@@ -3,7 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
-	"strings"
+	"maps"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,83 +13,63 @@ import (
 	"go.uber.org/zap"
 )
 
-// SupportedKeys is the whitelisted key namespace exposed by the Query API.
-// Keys are dot-separated. Anything not in this map returns InvalidArgument.
-var SupportedKeys = map[string]string{
-	"TENANT.id":                          "string",
-	"TENANT.displayName":                 "string",
-	"TENANT.runtime":                     "object",
-	"TENANT.resources.identityPoolID":    "string",
-	"TENANT.resources.identityPoolARN":   "string",
-	"TENANT.resources.storageBucketName": "string",
-	"AUTHZ.jwt.issuerAllowList":          "array",
-	"AUTHZ.jwt.subjectClaim":             "string",
-	"AUTHZ.jwt.scopesClaim":              "string",
-	"AUTHZ.bindings":                     "array",
-	"AUTHZ.roleBindings":                 "array",
+// ConfigEntry holds the extracted, cached configuration data for a single
+// namespace. Sources is keyed by the name of the object that contributed
+// each slice (e.g. a ConfigMap name) - each source owns its own slice via
+// the patch-based merge in internal/kube/watcher.go, so one source's update
+// never clobbers another's data for the same namespace.
+type ConfigEntry struct {
+	Namespace string
+	Sources   map[string]map[string]any
+	Revision  string
+	UpdatedAt time.Time
 }
 
-// SupportedKeyDescriptions provides human-readable descriptions for the Describe RPC.
-var SupportedKeyDescriptions = map[string]string{
-	"TENANT.id":                          "Stable tenant identifier",
-	"TENANT.displayName":                 "Human-readable display name",
-	"TENANT.runtime":                     "Runtime configuration bag (non-secret)",
-	"TENANT.resources.identityPoolID":    "Provisioned identity pool ID",
-	"TENANT.resources.identityPoolARN":   "Provisioned identity pool ARN",
-	"TENANT.resources.storageBucketName": "Provisioned storage bucket name",
-	"AUTHZ.jwt.issuerAllowList":          "Accepted JWT issuers (empty = skip validation)",
-	"AUTHZ.jwt.subjectClaim":             "JWT claim used as subject (default: sub)",
-	"AUTHZ.jwt.scopesClaim":              "JWT claim used for scopes (default: scp)",
-	"AUTHZ.bindings":                     "Subject-to-permissions bindings",
-	"AUTHZ.roleBindings":                 "Role-to-permissions bindings",
+// Merged returns the flattened view of all sources' data. On key collision
+// across sources, the alphabetically later source name wins - deterministic,
+// but not semantically meaningful. Operators should avoid overlapping keys
+// across multiple sources in the same namespace.
+func (e *ConfigEntry) Merged() map[string]any {
+	out := make(map[string]any)
+	for _, name := range sortedSourceNames(e.Sources) {
+		maps.Copy(out, e.Sources[name])
+	}
+	return out
 }
 
-// AuthzBindingSnapshot is the in-memory representation of a subject binding.
-type AuthzBindingSnapshot struct {
-	Subject     string
-	Permissions []string
+// Resolve returns a key's value and which source contributed it, following
+// the same precedence as Merged.
+func (e *ConfigEntry) Resolve(key string) (value any, source string, ok bool) {
+	for _, name := range sortedSourceNames(e.Sources) {
+		if v, exists := e.Sources[name][key]; exists {
+			value, source, ok = v, name, true
+		}
+	}
+	return
 }
 
-// AuthzRoleBindingSnapshot is the in-memory representation of a role binding.
-type AuthzRoleBindingSnapshot struct {
-	Role        string
-	Permissions []string
+func sortedSourceNames(sources map[string]map[string]any) []string {
+	names := make([]string, 0, len(sources))
+	for name := range sources {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
-// AuthzPolicySnapshot is the in-memory projection of a tenant's Policy spec.
-type AuthzPolicySnapshot struct {
-	IssuerAllowList []string
-	SubjectClaim    string
-	ScopesClaim     string
-	Bindings        []AuthzBindingSnapshot
-	RoleBindings    []AuthzRoleBindingSnapshot
-}
-
-// TenantState holds the extracted, cached data for a dingle tenant.
-// Fields are populated by the informer handlers in internal/kube/watcher.go
-type TenantState struct {
-	TenantID       string
-	DisplayName    string
-	RuntimeConfig  map[string]any
-	CloudResources map[string]any
-	AuthzPolicy    *AuthzPolicySnapshot
-	Revision       string
-	UpdatedAt      time.Time
-}
-
-// Cache holds in-memory tenant state keyed bu tenant ID.
-// Reads use Rlock; writes use full Lock. Marked synced after
-// the informer cache completes its initial list+watch cycle.
+// Cache holds in-memory configuration state keyed by namespace.
+// Reads use RLock; writes use full Lock. Marked synced after the informer
+// cache completes its initial list+watch cycle.
 type Cache struct {
-	mu       sync.RWMutex
-	byTenant map[string]*TenantState
-	synced   atomic.Bool
+	mu          sync.RWMutex
+	byNamespace map[string]*ConfigEntry
+	synced      atomic.Bool
 }
 
-// NewCache creates an empty tenant cache.
+// NewCache creates an empty config cache.
 func NewCache() *Cache {
 	return &Cache{
-		byTenant: make(map[string]*TenantState),
+		byNamespace: make(map[string]*ConfigEntry),
 	}
 }
 
@@ -102,39 +83,50 @@ func (c *Cache) SetSynced() {
 	c.synced.Store(true)
 }
 
-// Get returns the state for a tenant, or nil if not found.
-func (c *Cache) Get(tenantID string) *TenantState {
+// Get returns the entry for a namespace, or nil if not found.
+func (c *Cache) Get(namespace string) *ConfigEntry {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.byTenant[tenantID]
+	return c.byNamespace[namespace]
 }
 
-// Set stores or replaces tenant state under a write lock.
-func (c *Cache) Set(state *TenantState) {
+// Set stores or replaces a namespace's entry under a write lock.
+func (c *Cache) Set(entry *ConfigEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.byTenant[state.TenantID] = state
+	c.byNamespace[entry.Namespace] = entry
 }
 
-// Delete removes a tenant from the cache
-func (c *Cache) Delete(tenantID string) {
+// Delete removes a namespace from the cache.
+func (c *Cache) Delete(namespace string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	delete(c.byTenant, tenantID)
+	delete(c.byNamespace, namespace)
 }
 
-// Len returns the numer of cached tenants.
+// Len returns the number of cached namespaces.
 func (c *Cache) Len() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return len(c.byTenant)
+	return len(c.byNamespace)
 }
 
-// QueryResult represents a single resolved key-valu pair.
+// QueryResult represents a single resolved key-value pair.
 type QueryResult struct {
 	Key    string
 	Value  any
-	Source string // which CRD field this was resolved from.
+	Source string // which config source (e.g. ConfigMap name) this was resolved from.
+}
+
+// ConfigSourceDescriptor describes an active source of configuration data,
+// backing the Describe RPC. Unlike the resolver's previous fixed key
+// vocabulary, ConfigMap (and future bring-your-own-CRD) data has no static
+// leaf-key enumeration - the source's shape (kind, label selector, scope) is
+// the only thing that's actually static.
+type ConfigSourceDescriptor struct {
+	Kind          string
+	LabelSelector string
+	Scope         string
 }
 
 // DiscoveryService implements the core query logic.
@@ -143,52 +135,52 @@ type DiscoveryService struct {
 	log           *zap.Logger
 	cacheEntryTTL time.Duration
 	now           func() time.Time
+	sources       []ConfigSourceDescriptor
 }
 
-// NewDiscoveryService contructs a DiscoveryService with an empty cache.
+// NewDiscoveryService constructs a DiscoveryService with an empty cache.
 func NewDiscoveryService(cfg *config.Config, log *zap.Logger) *DiscoveryService {
 	return &DiscoveryService{
 		Cache:         NewCache(),
 		log:           log,
 		cacheEntryTTL: cfg.CacheEntryTTL,
 		now:           time.Now,
+		sources: []ConfigSourceDescriptor{
+			{Kind: "ConfigMap", LabelSelector: cfg.ConfigMapLabelSelector, Scope: "namespace"},
+		},
 	}
 }
 
-// Query resolves the requested keys from the tenant's cached state.
+// Describe returns the active config sources, for the Describe RPC.
+func (s *DiscoveryService) Describe() []ConfigSourceDescriptor {
+	return s.sources
+}
+
+// Query resolves the requested keys from the namespace's cached configuration.
 //
 // Error Precedence:
-//   - cache not sunced		-> ErrCacheNotSynced	(Unavailable)
-//   - tenant_id empty		-> ErrTenantIDRequired	(InvalidArgument)
-//   - unsupported key		-> ErrUnsupportedKey	(invalidArgument)
-//   - tenant not fud		-> ErrTenantNotFound	(NotFound)
+//   - cache not synced		-> ErrCacheNotSynced	(Unavailable)
+//   - namespace empty		-> ErrNamespaceRequired	(InvalidArgument)
+//   - namespace not found	-> ErrNamespaceNotFound	(NotFound)
 //   - stale entry			-> ErrCacheEntryStale	(Unavailable)
 //   - strict + missing key	-> ErrStrictMissingKeys (InvalidArgument)
-func (s *DiscoveryService) Query(ctx context.Context, tenantID string, keys []string, strict bool) ([]QueryResult, []string, string, error) {
+func (s *DiscoveryService) Query(ctx context.Context, namespace string, keys []string, strict bool) ([]QueryResult, []string, string, error) {
 	if !s.Cache.IsSynced() {
 		return nil, nil, "", fmt.Errorf("%w", ErrCacheNotSynced)
 	}
 
-	if tenantID == "" {
-		return nil, nil, "", fmt.Errorf("%w", ErrTenantIDRequired)
+	if namespace == "" {
+		return nil, nil, "", fmt.Errorf("%w", ErrNamespaceRequired)
 	}
 
-	for _, k := range keys {
-		if _, ok := SupportedKeys[k]; !ok {
-			return nil, nil, "", fmt.Errorf("%w: %s", ErrUnsupportedKey, k)
-		}
+	entry := s.Cache.Get(namespace)
+	if entry == nil {
+		return nil, nil, "", fmt.Errorf("%w: %s", ErrNamespaceNotFound, namespace)
 	}
 
-	// Cache keys are bare tenant IDs; strip the namespace prefix if present.
-	normalizedID := strings.TrimPrefix(tenantID, "tenant-")
-	state := s.Cache.Get(normalizedID)
-	if state == nil {
-		return nil, nil, "", fmt.Errorf("%w: %s", ErrTenantNotFound, tenantID)
-	}
-
-	if s.cacheEntryTTL > 0 && !state.UpdatedAt.IsZero() {
-		if s.now().Sub(state.UpdatedAt) > s.cacheEntryTTL {
-			return nil, nil, "", fmt.Errorf("%w: %s", ErrCacheEntryStale, tenantID)
+	if s.cacheEntryTTL > 0 && !entry.UpdatedAt.IsZero() {
+		if s.now().Sub(entry.UpdatedAt) > s.cacheEntryTTL {
+			return nil, nil, "", fmt.Errorf("%w: %s", ErrCacheEntryStale, namespace)
 		}
 	}
 
@@ -196,116 +188,12 @@ func (s *DiscoveryService) Query(ctx context.Context, tenantID string, keys []st
 	var missing []string
 
 	for _, k := range keys {
-		switch k {
-
-		case "TENANT.id":
-			results = append(results, QueryResult{Key: k, Value: state.TenantID, Source: "tenant.spec.tenantID"})
-
-		case "TENANT.displayName":
-			results = append(results, QueryResult{Key: k, Value: state.DisplayName, Source: "tenant.spec.displayName"})
-
-		case "TENANT.runtime":
-			if state.RuntimeConfig == nil {
-				missing = append(missing, k)
-				continue
-			}
-
-			results = append(results, QueryResult{Key: k, Value: state.RuntimeConfig, Source: "tenant.spec.runtimeConfig"})
-
-		case "TENANT.resources.identityPoolID":
-			v, ok := CloudResourceField(state.CloudResources, "identityPoolID")
-			if !ok {
-				missing = append(missing, k)
-				continue
-			}
-
-			results = append(results, QueryResult{Key: k, Value: v, Source: "tenant.status.cloudResources.identityPoolID"})
-
-		case "TENANT.resources.identityPoolARN":
-			v, ok := CloudResourceField(state.CloudResources, "identityPoolARN")
-			if !ok {
-				missing = append(missing, k)
-				continue
-			}
-
-			results = append(results, QueryResult{Key: k, Value: v, Source: "tenant.status.cloudResources.identityPoolARN"})
-
-		case "TENANT.resources.storageBucketName":
-			v, ok := CloudResourceField(state.CloudResources, "storageBucketName")
-			if !ok {
-				missing = append(missing, k)
-				continue
-			}
-
-			results = append(results, QueryResult{Key: k, Value: v, Source: "tenant.status.cloudResources.storageBucketName"})
-
-		case "AUTHZ.jwt.issuerAllowList":
-			if state.AuthzPolicy == nil {
-				missing = append(missing, k)
-				continue
-			}
-
-			issuers := make([]any, 0, len(state.AuthzPolicy.IssuerAllowList))
-			for _, issuer := range state.AuthzPolicy.IssuerAllowList {
-				issuers = append(issuers, issuer)
-			}
-
-			results = append(results, QueryResult{Key: k, Value: issuers, Source: "policy.spec.jwt.issuerAllowList"})
-
-		case "AUTHZ.jwt.subjectClaim":
-			if state.AuthzPolicy == nil {
-				missing = append(missing, k)
-				continue
-			}
-
-			results = append(results, QueryResult{Key: k, Value: state.AuthzPolicy.SubjectClaim, Source: "policy.spec.jwt.subjectClaim"})
-
-		case "AUTHZ.jwt.scopesClaim":
-			if state.AuthzPolicy == nil {
-				missing = append(missing, k)
-				continue
-			}
-
-			results = append(results, QueryResult{Key: k, Value: state.AuthzPolicy.ScopesClaim, Source: "policy.spec.jwt.scopesClaim"})
-
-		case "AUTHZ.bindings":
-			if state.AuthzPolicy == nil {
-				missing = append(missing, k)
-				continue
-			}
-
-			bindings := make([]any, 0, len(state.AuthzPolicy.Bindings))
-			for _, b := range state.AuthzPolicy.Bindings {
-				perms := make([]any, 0, len(b.Permissions))
-				for _, p := range b.Permissions {
-					perms = append(perms, p)
-				}
-				bindings = append(bindings, map[string]any{"subject": b.Subject, "permissions": perms})
-			}
-
-			results = append(results, QueryResult{Key: k, Value: bindings, Source: "policy.spec.bindings"})
-
-		case "AUTHZ.roleBindings":
-			if state.AuthzPolicy == nil {
-				missing = append(missing, k)
-				continue
-			}
-
-			roleBindings := make([]any, 0, len(state.AuthzPolicy.RoleBindings))
-			for _, rb := range state.AuthzPolicy.RoleBindings {
-				perms := make([]any, 0, len(rb.Permissions))
-				for _, p := range rb.Permissions {
-					perms = append(perms, p)
-				}
-				roleBindings = append(roleBindings, map[string]any{"role": rb.Role, "permissions": perms})
-			}
-
-			results = append(results, QueryResult{Key: k, Value: roleBindings, Source: "policy.spec.roleBindings"})
-
-		default:
+		v, source, ok := entry.Resolve(k)
+		if !ok {
 			missing = append(missing, k)
-
+			continue
 		}
+		results = append(results, QueryResult{Key: k, Value: v, Source: source})
 	}
 
 	if strict && len(missing) > 0 {
@@ -313,29 +201,10 @@ func (s *DiscoveryService) Query(ctx context.Context, tenantID string, keys []st
 	}
 
 	s.log.Debug("query completed",
-		zap.String("tenant_id", tenantID),
+		zap.String("namespace", namespace),
 		zap.Int("keys_requested", len(keys)),
 		zap.Int("keys_resolved", len(results)),
 	)
 
-	return results, missing, state.Revision, nil
-}
-
-// CloudResourceField extracts a named string field from the CloudResources map.
-func CloudResourceField(resources map[string]any, field string) (string, bool) {
-	if resources == nil {
-		return "", false
-	}
-
-	v, ok := resources[field]
-	if !ok {
-		return "", false
-	}
-
-	s, ok := v.(string)
-	if !ok || s == "" {
-		return "", false
-	}
-
-	return s, true
+	return results, missing, entry.Revision, nil
 }
