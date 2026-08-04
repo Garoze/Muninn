@@ -14,7 +14,7 @@ import (
 )
 
 var Module = fx.Options(
-	fx.Provide(newLogger),
+	fx.Provide(NewLogger),
 	fx.Provide(func() prometheus.Registerer { return prometheus.DefaultRegisterer }),
 	fx.Provide(NewMetrics),
 	fx.Provide(NewGRPCListener),
@@ -24,7 +24,9 @@ var Module = fx.Options(
 	fx.Invoke(shutdownTracerProvider),
 )
 
-func newLogger() (*zap.Logger, error) {
+// NewLogger constructs the shared production zap.Logger, used by every
+// muninn process mode (serve, webhook).
+func NewLogger() (*zap.Logger, error) {
 	return zap.NewProduction()
 }
 
