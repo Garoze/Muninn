@@ -21,6 +21,7 @@ func TestNew_Defaults(t *testing.T) {
 		"ConfigMapLabelSelector": {cfg.ConfigMapLabelSelector, "muninn.io/config=runtime"},
 		"CacheEntryTTL":          {cfg.CacheEntryTTL, time.Duration(0)},
 		"StartupTimeout":         {cfg.StartupTimeout, 2 * time.Minute},
+		"SelfAddr":               {cfg.SelfAddr, "muninn.muninn-system.svc.cluster.local:5010"},
 	}
 
 	for name, tc := range cases {
@@ -42,6 +43,7 @@ func TestNew_EnvOverrides(t *testing.T) {
 	t.Setenv("CONFIGMAP_LABEL_SELECTOR", "app.io/config=true")
 	t.Setenv("CACHE_ENTRY_TTL", "30s")
 	t.Setenv("STARTUP_TIMEOUT", "5m")
+	t.Setenv("MUNINN_SELF_ADDR", "muninn.other-ns.svc.cluster.local:5010")
 
 	cfg := New()
 
@@ -71,6 +73,9 @@ func TestNew_EnvOverrides(t *testing.T) {
 	}
 	if cfg.StartupTimeout != 5*time.Minute {
 		t.Errorf("StartupTimeout: got %v", cfg.StartupTimeout)
+	}
+	if cfg.SelfAddr != "muninn.other-ns.svc.cluster.local:5010" {
+		t.Errorf("SelfAddr: got %q", cfg.SelfAddr)
 	}
 }
 
