@@ -12,7 +12,7 @@
 - [ ] New feature (non-breaking change that adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to change)
 - [ ] Documentation update
-- [ ] CRD / API change
+- [ ] API / proto change
 - [ ] Dependency update
 - [ ] Refactor / technical debt reduction
 - [ ] Other (describe below)
@@ -37,10 +37,9 @@
       `internal/observability/metrics.go`. (This repo has shipped this
       exact bug before — it crashes the process on first use, not at
       startup.)
-- [ ] **CRD regen verified** — If `api/v1alpha1` changed: `make generate`
-      and `make install-crds` were run, and the generated CRD YAML was
-      checked to actually reflect the change (`controller-gen` silently
-      skips markers it doesn't recognize).
+- [ ] **Proto regen verified** — If `proto/v1/discovery.proto` changed:
+      `make proto` was run and the regenerated code under
+      `gen/discovery/v1` is included in the diff.
 - [ ] **Config hygiene** — New configuration is env-var driven with a
       sensible default, not hardcoded. No secrets committed.
 - [ ] **Test coverage** — New code paths are tested, including negative

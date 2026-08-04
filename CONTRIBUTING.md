@@ -8,9 +8,9 @@ the [Code of Conduct](./CODE_OF_CONDUCT.md).
 ## Getting started
 
 Follow the [README's "Getting started"](./README.md#getting-started)
-section: Go 1.26+, a Kubernetes cluster, `controller-gen`, and optionally
-`grpcurl`. You should be able to `make install-crds`, `make sample`, and
-`make run` successfully before making changes.
+section: Go 1.26+, a Kubernetes cluster, and optionally `grpcurl`. You
+should be able to `make sample` and `make run` successfully before making
+changes.
 
 ## Making changes
 
@@ -22,16 +22,14 @@ make test-unit     # go test ./... -short
 
 All three must pass before opening a PR.
 
-If your change touches `api/v1alpha1` (the CRD Go types), also run:
+If your change touches `proto/v1/discovery.proto`, also run:
 
 ```bash
-make generate       # regenerate deepcopy code
-make install-crds    # regenerate CRD YAML and apply it to your cluster
+make proto    # regenerate gRPC stubs (requires protoc)
 ```
 
-and confirm the generated CRD actually picked up your change —
-`controller-gen` skips markers it doesn't recognize instead of failing,
-so a typo in a kubebuilder marker can silently produce no effect.
+and confirm the regenerated code in `gen/discovery/v1` is committed
+alongside the `.proto` change.
 
 ## Tests
 

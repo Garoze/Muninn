@@ -14,13 +14,14 @@
   <a href="./go.mod"><img alt="go version" src="https://img.shields.io/github/go-mod/go-version/Garoze/Muninn"></a>
 </p>
 
-**Kubernetes-native, multi-tenant runtime configuration discovery service.**
+**Kubernetes-native runtime configuration resolver.**
 
-Muninn watches Kubernetes CRDs, projects them into an in-memory cache keyed
-by tenant, and exposes that cache over a gRPC Query API. Downstream services
-query Muninn for a set of keys scoped to a tenant instead of reading
-Kubernetes objects directly — Muninn is the only component that needs to
-know what a `Tenant`, `TenantConfig`, or `Policy` object looks like.
+Muninn watches Kubernetes ConfigMaps (scoped by a label selector), projects
+them into an in-memory cache keyed by namespace, and exposes that cache over
+a gRPC Query API. Downstream services query Muninn for a set of keys scoped
+to a namespace instead of reading Kubernetes objects directly. Muninn makes
+no assumptions about what those keys mean, what a "tenant" is, or what
+platform sits underneath it — it resolves configuration, nothing more.
 
 ```mermaid
 flowchart LR
@@ -31,23 +32,20 @@ flowchart LR
 
 ## Motivation
 
-Most services in a multi-tenant platform need the same handful of
-per-tenant facts — display name, feature flags, provisioned cloud resource
-IDs, JWT validation rules — and none of them should read CRDs directly to
-get them. Muninn centralizes that: one service watches the CRDs,
-normalizes them into a stable key namespace, and serves that namespace over
-gRPC with a documented contract (`Describe`) and hard whitelisting (unknown
-keys are rejected, not silently ignored).
+Most services in a Kubernetes-native platform need the same handful of
+per-namespace configuration values, and none of them should read ConfigMaps
+directly to get them — that couples every consumer to a naming convention
+and a Kubernetes client. Muninn centralizes that: one service watches
+labeled ConfigMaps, merges them into a per-namespace view, and serves that
+view over gRPC with a documented contract (`Describe`).
+
+A namespace is a natural, generic scope — it composes cleanly with a
+single-tenant deployment (one ConfigMap in `default`), a multi-tenant one
+(a ConfigMap per tenant namespace, as in the
+[multi-tenant usage example](#multi-tenant-usage-an-example-not-a-requirement)
+below), or a consumer's own custom resource, without Muninn dictating which.
 
 ## Architecture
-
-Three CRDs, all under group `muninn.io`, namespace `tenant-<id>`:
-
-| CRD            | Scope      | Purpose                                                                              |
-|----------------|------------|--------------------------------------------------------------------------------------|
-| `Tenant`       | Cluster    | Identity, lifecycle phase, provisioned cloud resource refs (`status.cloudResources`) |
-| `TenantConfig` | Namespaced | Arbitrary `map[string]string` runtime config                                         |
-| `Policy`       | Namespaced | JWT validation settings, subject/role → permission bindings                          |
 
 | Package                   | Role                                                              |
 |---------------------------|--------------------------------------------------------------------|
@@ -56,7 +54,6 @@ Three CRDs, all under group `muninn.io`, namespace `tenant-<id>`:
 | `internal/transport/grpc` | proto ↔ domain translation, gRPC handler                          |
 | `internal/observability`  | Prometheus metrics, health checks, gRPC server/listener            |
 | `internal/config`         | env-driven configuration                                            |
-| `api/v1alpha1`            | CRD Go types + generated deepcopy                                  |
 | `gen/discovery/v1`        | generated gRPC/protobuf stubs                                       |
 
 The domain layer is decoupled from both Kubernetes and gRPC specifics —
@@ -66,13 +63,15 @@ why, and how that boundary is enforced.
 
 Three design principles underpin the implementation:
 
-- **Patch-based cache merge** — each CRD owns its own slice of a tenant's
-  cached state, so a `Policy` update never touches `TenantConfig` data.
+- **Patch-based cache merge** — each ConfigMap owns its own slice of a
+  namespace's cached state, so one ConfigMap's update never touches
+  another's data in the same namespace.
 - **Readiness gating** — the gRPC health check stays `NOT_SERVING` until
   the informer cache completes its initial list+watch cycle.
-- **Key whitelisting** — `Describe` exposes the full set of queryable
-  keys; anything outside it returns `InvalidArgument` rather than an
-  empty response.
+- **No fixed key vocabulary** — Muninn serves whatever keys exist in the
+  resolved ConfigMap data; `Describe` reports the active config source
+  (kind, label selector, scope) rather than an enumerated key list, since
+  the data itself is open-ended.
 
 See [`docs/design.md`](docs/design.md) for the rationale behind these and
 other design decisions.
@@ -85,8 +84,6 @@ other design decisions.
 - `make`
 - A running Kubernetes cluster and `kubectl` pointed at it (developed
   against [k3s](https://k3s.io/); any cluster works)
-- [`controller-gen`](https://github.com/kubernetes-sigs/controller-tools)
-  on `PATH` (`go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest`)
 - [`grpcurl`](https://github.com/fullstorydev/grpcurl) (optional — for
   calling the API directly instead of through `muninnctl`; the server
   registers gRPC reflection, so no `.proto` files are needed client-side)
@@ -96,29 +93,18 @@ other design decisions.
   `export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)`. Downloads a
   throwaway `etcd`/`kube-apiserver` pair; doesn't touch the real cluster.
 
-### Install the CRDs
-
-```bash
-export KUBECONFIG=~/.kube/config   # or wherever the cluster's kubeconfig lives
-make install-crds
-```
-
-Generates CRD manifests from the Go types in `api/v1alpha1` and applies
-them.
-
 ### Apply the sample fixtures
 
 ```bash
-make sample           # Namespace + Tenant + TenantConfig + Policy
-make sample-status    # patches Tenant.status.cloudResources (a separate
-                      # subresource — `kubectl apply` on spec alone can't
-                      # touch it)
+export KUBECONFIG=~/.kube/config   # or wherever the cluster's kubeconfig lives
+make sample                        # Namespace + a labeled ConfigMap
 ```
 
 > [!NOTE]
-> This creates a sample tenant (`arasaka`) with placeholder — not real —
-> identity pool/storage bucket values, so there is data to query without
-> further setup.
+> This creates a sample namespace (`arasaka`) with a ConfigMap labeled
+> `muninn.io/config: "runtime"` and a couple of example `data` keys, so
+> there is data to query without further setup. No CRD installation is
+> required — Muninn watches core `ConfigMap` objects.
 
 ### Run it
 
@@ -144,11 +130,11 @@ watching"`) and the gRPC server binding `:5010` (configurable via
 ### Query it
 
 ```bash
-# discover the supported key namespace
+# list the active config sources
 make describe
 
-# query specific keys for the sample tenant
-make query TENANT=arasaka KEYS=TENANT.id,TENANT.displayName,TENANT.resources.identityPoolID
+# query specific keys for the sample namespace
+make query NAMESPACE=arasaka KEYS=LOG_LEVEL,FEATURE_DARKMODE
 ```
 
 Or call the API directly with `grpcurl`, since the server registers gRPC
@@ -158,15 +144,14 @@ reflection:
 grpcurl -plaintext localhost:5010 discovery.v1.DiscoveryService/Describe
 
 grpcurl -plaintext -d '{
-  "tenant_id": "arasaka",
-  "keys": ["TENANT.id", "TENANT.displayName", "TENANT.resources.identityPoolID"]
+  "namespace": "arasaka",
+  "keys": ["LOG_LEVEL", "FEATURE_DARKMODE"]
 }' localhost:5010 discovery.v1.DiscoveryService/Query
 ```
 
 Live cluster changes are reflected without restarting the process — try
-`kubectl patch tenantconfig arasaka -n tenant-arasaka --type=merge -p
-'{"spec":{"runtimeConfig":{"NEW_KEY":"value"}}}'` and re-run the `Query`
-call for `TENANT.runtime`.
+`kubectl patch configmap runtime-config -n arasaka --type=merge -p
+'{"data":{"LOG_LEVEL":"debug"}}'` and re-run the `Query` call.
 
 ## Deployment
 
@@ -183,11 +168,42 @@ make deploy     # apply config/manager/ + config/rbac/
 ```bash
 kubectl get pods -n muninn-system   # should reach 1/1 Running
 kubectl port-forward -n muninn-system deploy/muninn 5010:5010 &
-make query TENANT=arasaka KEYS=TENANT.id
+make query NAMESPACE=arasaka KEYS=LOG_LEVEL
 ```
 
 `make undeploy` tears it back down. See [`docs/design.md`](docs/design.md)
 for the RBAC and deployment rationale.
+
+### Multi-tenant usage (an example, not a requirement)
+
+Muninn's core scope is a single label selector across namespaces — it has
+no built-in notion of a tenant and imposes no namespace naming convention.
+A namespace-per-tenant pattern, common in multi-tenant Kubernetes platforms,
+composes with that directly: give each tenant its own namespace (named
+however the platform names them — nothing below depends on a particular
+scheme), place a `muninn.io/config: "runtime"`-labeled ConfigMap in each,
+and query by that namespace:
+
+```bash
+kubectl create namespace acme
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: runtime-config
+  namespace: acme
+  labels:
+    muninn.io/config: "runtime"
+data:
+  FEATURE_DARKMODE: "false"
+EOF
+
+make query NAMESPACE=acme KEYS=FEATURE_DARKMODE
+```
+
+A second tenant (`globex`, or anything else) is the same ConfigMap shape in
+a different namespace — Muninn's cache is keyed by namespace regardless of
+what a given deployment chooses to call it.
 
 ## Observability
 
@@ -219,7 +235,7 @@ make run
 ```
 
 ```bash
-make query TENANT=arasaka KEYS=TENANT.id
+make query NAMESPACE=arasaka KEYS=LOG_LEVEL
 ```
 
 Open `http://localhost:16686`, select the `muninn` service, and find the
@@ -252,14 +268,12 @@ happy path, not only the resource-scoped merge guarantee described above.
 
 | Target                                         | Does                                                                      |
 |------------------------------------------------|---------------------------------------------------------------------------|
-| `make generate`                                | Regenerate deepcopy code from kubebuilder markers                         |
-| `make install-crds`                            | Generate + apply CRD manifests to `$KUBECONFIG`                           |
-| `make sample` / `make sample-status`           | Apply sample fixtures / patch sample status                               |
+| `make sample`                                  | Apply the sample Namespace + labeled ConfigMap                            |
 | `make run`                                     | Run the server locally against `$KUBECONFIG`                              |
 | `make test` / `test-unit` / `test-integration` | Run tests                                                                 |
 | `make test-e2e`                                | Deploy + exercise + tear down against the real cluster (not part of `make test`) |
-| `make query TENANT=<id> KEYS=<a,b,c>`          | Query keys for a tenant via `muninnctl`                                   |
-| `make describe`                                | List supported configuration keys via `muninnctl`                         |
+| `make query NAMESPACE=<ns> KEYS=<a,b,c>`       | Query keys for a namespace via `muninnctl`                                |
+| `make describe`                                | List the active configuration sources via `muninnctl`                     |
 | `make fmt` / `vet` / `lint` / `tidy`           | Standard Go hygiene                                                       |
 | `make proto`                                   | Regenerate gRPC stubs from `proto/v1/discovery.proto` (requires `protoc`) |
 | `make build`                                   | Compile `cmd/` entrypoints into `bin/`                                    |
@@ -279,10 +293,11 @@ tradeoffs as standalone Architecture Decision Records.
 ## Status
 
 Muninn is a portfolio project, not deployed in production. Its design
-reflects patterns used in a production multi-tenant platform.
+reflects patterns used in a production multi-tenant platform, generalized
+into a standalone config resolver with no platform assumptions baked in.
 Feature-complete for its current scope:
 
-- CRD watching, patch-based cache merge across `Tenant`/`TenantConfig`/`Policy`
+- ConfigMap watching (label-selector scoped), patch-based cache merge across sources
 - The full gRPC Query/Describe API
 - `muninnctl` — a kubectl-style CLI for `query`/`describe`
 - A container image (multi-stage, distroless, verified end-to-end into a local k3s node)
@@ -292,7 +307,10 @@ Feature-complete for its current scope:
 - OpenTelemetry tracing on every gRPC call, `ParentBased` sampling, with a Jaeger walkthrough for viewing it (see `docs/design.md`)
 - Fx-based dependency wiring and unit test coverage across every package
 
-No further scope is currently planned.
+Planned next: a pluggable config-source interface for bring-your-own config
+CRDs, and a mutating admission webhook that delivers resolved config to a
+pod's filesystem with live reload, so consumers don't need a gRPC client at
+all.
 
 ## License
 
