@@ -16,18 +16,25 @@
 
 **Kubernetes-native runtime configuration resolver.**
 
-Muninn watches Kubernetes ConfigMaps (scoped by a label selector), projects
-them into an in-memory cache keyed by namespace, and exposes that cache over
-a gRPC Query API. Downstream services query Muninn for a set of keys scoped
-to a namespace instead of reading Kubernetes objects directly. Muninn makes
-no assumptions about what those keys mean, what a "tenant" is, or what
+Muninn watches a pluggable set of Kubernetes objects — core `ConfigMap`,
+scoped by a label selector, is the default and only source registered
+today — projects them into an in-memory cache keyed by namespace, and
+exposes that cache over a gRPC API (`Query` for specific keys, `Resolve`
+for everything in a namespace, `Describe` for the active sources' shape).
+A mutating admission webhook offers a second, code-free integration path:
+a Pod that opts in via an annotation gets a shared volume, an init
+container, and a sidecar injected automatically, and reads its resolved
+configuration as a file instead of a gRPC client. Muninn makes no
+assumptions about what those keys mean, what a "tenant" is, or what
 platform sits underneath it — it resolves configuration, nothing more.
 
 ```mermaid
 flowchart LR
-    K[Kubernetes API] --> I[controller-runtime informers]
+    K[Kubernetes API] --> I[ConfigSource watchers]
     I --> C[(In-memory cache)]
-    C --> G[gRPC Query API]
+    C --> G[gRPC Query/Resolve API]
+    C --> H[Mutating admission webhook]
+    H --> F[Config file in a consumer Pod]
 ```
 
 ## Motivation
@@ -47,29 +54,36 @@ below), or a consumer's own custom resource, without Muninn dictating which.
 
 ## Architecture
 
-| Package                   | Role                                                              |
-|---------------------------|--------------------------------------------------------------------|
-| `internal/kube`           | controller-runtime informers, patch-based cache sync              |
-| `internal/app`            | domain layer: `Cache`, `DiscoveryService.Query`, sentinel errors   |
-| `internal/transport/grpc` | proto ↔ domain translation, gRPC handler                          |
-| `internal/observability`  | Prometheus metrics, health checks, gRPC server/listener            |
-| `internal/config`         | env-driven configuration                                            |
-| `gen/discovery/v1`        | generated gRPC/protobuf stubs                                       |
+| Package                    | Role                                                                |
+|----------------------------|----------------------------------------------------------------------|
+| `internal/kube`            | `ConfigSource` interface + `ConfigMapSource`, informers, patch-based cache sync |
+| `internal/app`             | domain layer: `Cache`, `DiscoveryService.Query/Resolve`, sentinel errors |
+| `internal/transport/grpc`  | proto ↔ domain translation, gRPC handler                            |
+| `internal/webhook`         | mutating admission webhook: Pod injection patch, HTTPS server        |
+| `internal/discoveryclient` | shared gRPC dial helper (used by `muninnctl` and `muninn resolve`)    |
+| `internal/observability`   | Prometheus metrics, tracing, health checks, gRPC server/listener      |
+| `internal/config`          | env-driven configuration                                             |
+| `gen/discovery/v1`         | generated gRPC/protobuf stubs                                        |
 
 The domain layer is decoupled from both Kubernetes and gRPC specifics —
 each edge translates in its own direction, and the domain package itself
 has no knowledge of either. See [`docs/design.md`](docs/design.md) for
 why, and how that boundary is enforced.
 
-Three design principles underpin the implementation:
+Four design principles underpin the implementation:
 
-- **Patch-based cache merge** — each ConfigMap owns its own slice of a
-  namespace's cached state, so one ConfigMap's update never touches
-  another's data in the same namespace.
+- **Pluggable sources** — the watch layer, cache, and domain layer are
+  written against a `ConfigSource` interface, not against `ConfigMap`
+  specifically. A bring-your-own custom resource registers a second
+  source without changing any of the three.
+- **Patch-based cache merge** — each source object owns its own slice of
+  a namespace's cached state, so one source object's update never
+  touches another's data in the same namespace.
 - **Readiness gating** — the gRPC health check stays `NOT_SERVING` until
-  the informer cache completes its initial list+watch cycle.
+  every registered source's informer cache completes its initial
+  list+watch cycle.
 - **No fixed key vocabulary** — Muninn serves whatever keys exist in the
-  resolved ConfigMap data; `Describe` reports the active config source
+  resolved source data; `Describe` reports the active sources' shape
   (kind, label selector, scope) rather than an enumerated key list, since
   the data itself is open-ended.
 
@@ -205,6 +219,34 @@ A second tenant (`globex`, or anything else) is the same ConfigMap shape in
 a different namespace — Muninn's cache is keyed by namespace regardless of
 what a given deployment chooses to call it.
 
+### Delivering config as a file (the admission webhook)
+
+`make deploy` alone covers the gRPC API. The mutating admission webhook is
+a separate deployment, requiring [cert-manager](https://cert-manager.io/)
+already installed on the cluster (an external prerequisite Muninn's own
+manifests don't install):
+
+```bash
+make deploy-webhook     # apply config/webhook/ — Issuer, Certificate,
+                         # Service, Deployment, MutatingWebhookConfiguration
+```
+
+Annotate any Pod to opt in — nothing else in its spec needs to change:
+
+```yaml
+metadata:
+  annotations:
+    muninn.io/inject: "true"
+```
+
+At admission, the webhook injects a shared volume, an init container that
+resolves the Pod's namespace once, and a sidecar that keeps the file
+current on an interval — and mounts that volume into the Pod's own
+container too, so the application reads `/etc/muninn/config.yaml`
+directly with no gRPC client of its own. `make undeploy-webhook` tears it
+back down. See [`docs/design.md`](docs/design.md) for the injection and
+drift-detection rationale.
+
 ## Observability
 
 Muninn exports an OpenTelemetry span for every gRPC call over OTLP to
@@ -283,9 +325,9 @@ happy path, not only the resource-scoped merge guarantee described above.
 ## Documentation
 
 [`docs/design.md`](docs/design.md) covers the full rationale behind every
-design decision referenced above: CRD field placement, the domain/transport
-boundary, error translation, Fx wiring, in-cluster RBAC, the end-to-end
-test, and OpenTelemetry tracing.
+design decision referenced above: the pluggable source model, the
+domain/transport boundary, error translation, Fx wiring, in-cluster RBAC,
+the end-to-end test, and observability.
 
 [`docs/adr/`](docs/adr/) records the decisions with the most significant
 tradeoffs as standalone Architecture Decision Records.
@@ -297,20 +339,21 @@ reflects patterns used in a production multi-tenant platform, generalized
 into a standalone config resolver with no platform assumptions baked in.
 Feature-complete for its current scope:
 
-- ConfigMap watching (label-selector scoped), patch-based cache merge across sources
-- The full gRPC Query/Describe API
+- A pluggable `ConfigSource` interface; `ConfigMap` watching (label-selector scoped) is the registered default, patch-based cache merge across sources
+- The full gRPC `Query`/`Resolve`/`Describe` API
 - `muninnctl` — a kubectl-style CLI for `query`/`describe`
+- A mutating admission webhook (`muninn webhook`) that injects a shared volume, init container, and sidecar into Pods opted in via annotation, and mounts that volume into the Pod's own containers too — config delivered as a file, no gRPC client needed
+- `muninn resolve` — the CLI mode backing the webhook's injected init container (one-shot) and sidecar (`--watch`, drift detection, atomic file writes)
 - A container image (multi-stage, distroless, verified end-to-end into a local k3s node)
-- In-cluster deployment under a least-privilege `ServiceAccount` (`config/manager/`, `config/rbac/`)
+- In-cluster deployment under least-privilege `ServiceAccount`s for both the resolver (`config/manager/`, `config/rbac/`) and the webhook (`config/webhook/`, including cert-manager-issued TLS)
 - Integration tests against a real API server via [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest) (also wired into CI)
-- An end-to-end deployment test against a real cluster (`test/e2e`, local-only — see `docs/design.md` for why it's not in CI)
-- OpenTelemetry tracing on every gRPC call, `ParentBased` sampling, with a Jaeger walkthrough for viewing it (see `docs/design.md`)
+- An end-to-end deployment test against a real cluster (`test/e2e`, local-only — see `docs/design.md` for why it's not in CI); the webhook's admission-time behavior is additionally verified manually against a real cluster (see `docs/design.md`'s Testing strategy for why that tier isn't automated)
+- OpenTelemetry tracing and Prometheus metrics on every gRPC call and every webhook admission request, `ParentBased` sampling, with a Jaeger walkthrough for viewing traces (see `docs/design.md`)
 - Fx-based dependency wiring and unit test coverage across every package
 
-Planned next: a pluggable config-source interface for bring-your-own config
-CRDs, and a mutating admission webhook that delivers resolved config to a
-pod's filesystem with live reload, so consumers don't need a gRPC client at
-all.
+Planned next: an operator-facing toggle for enabling/disabling individual
+registered `ConfigSource` kinds at deploy time (currently decided by which
+sources are registered in code).
 
 ## License
 
