@@ -55,29 +55,18 @@ type Config struct {
 	// WebhookTLSCertPath.
 	WebhookTLSKeyPath string
 
-	// SelfAddr is the in-cluster address consumers of Muninn's own gRPC API
-	// should dial - specifically, what the webhook stamps into the --addr
-	// flag of the init container/sidecar it injects into consumer Pods, since
-	// those run outside Muninn's own Pod and need a stable address rather than
-	// a Pod IP or port-forward.
+	// SelfAddr is the in-cluster address for consumers to dial Muninn's
+	// own gRPC API, since a Pod IP or port-forward isn't stable enough.
 	SelfAddr string
 
-	// InjectImage is the container image used for the init container and
-	// sidecar the webhook injects into opted-in Pods. Must match the image
-	// this webhook's own Deployment runs (both invoke the same muninn binary,
-	// just via `resolve` instead of `webhook`). Not derived automatically -
-	// Kubernetes' Downward API has no fieldRef for a container's own image -
-	// so this is set explicitly in config/manager/deployment.yaml, via a YAML
-	// anchor on that Deployment's own image field rather than a hand-copied
-	// value, so the two can't drift out of sync.
+	// InjectImage is the container image for the webhook's injected init
+	// container/sidecar. Must match this webhook's own Deployment image;
+	// Kubernetes has no Downward API fieldRef for a container's own image.
 	InjectImage string
 
 	// GRPCTLSCertPath is the path to the TLS certificate served by the
-	// gRPC API, if set. Unlike WebhookTLSCertPath, TLS on the gRPC API is
-	// optional: some deployments terminate mTLS at a service mesh sidecar
-	// and want the gRPC server itself to stay plaintext, others don't run
-	// behind a mesh and need the gRPC server to terminate TLS directly.
-	// Empty (the default, alongside GRPCTLSKeyPath) means plaintext.
+	// gRPC API, if set. Unlike WebhookTLSCertPath, TLS here is optional -
+	// see docs/design.md. Empty (with GRPCTLSKeyPath) means plaintext.
 	GRPCTLSCertPath string
 
 	// GRPCTLSKeyPath is the path to the TLS private key paired with
@@ -85,11 +74,9 @@ type Config struct {
 	// without the other is a configuration error, not a partial default.
 	GRPCTLSKeyPath string
 
-	// EnabledConfigSources restricts which registered ConfigSource kinds
-	// (matched against each source's Kind()) actually run, by name.
-	// Empty (the default) means every registered source is enabled - this
-	// only narrows the set already registered in code, it can't enable a
-	// source that isn't registered.
+	// EnabledConfigSources restricts which registered ConfigSource kinds run,
+	// by name. Empty (the default) enables every registered source; it can
+	// only narrow, not add sources not registered in code.
 	EnabledConfigSources []string
 }
 

@@ -70,9 +70,8 @@ func TestApplyPatch_CreatesNewEntry(t *testing.T) {
 	}
 }
 
-// TestApplyPatch_SourceScopedMerge is the core claim this project makes: one
-// ConfigMap's update must not clobber another ConfigMap's data in the same
-// namespace, because each source's patch only ever touches its own slice.
+// TestApplyPatch_SourceScopedMerge asserts one source's update never
+// clobbers another source's data in the same namespace.
 func TestApplyPatch_SourceScopedMerge(t *testing.T) {
 	w := newTestWatcher(t)
 
@@ -279,10 +278,8 @@ func TestOnSourceDelete_ClearsOwnSourceOnly(t *testing.T) {
 	}
 }
 
-// TestOnSourceUpsert_DifferentKindsDoNotCollide is the concrete proof the
-// ConfigSource abstraction composes: a ConfigMap and an unrelated source
-// kind sharing the same object name in the same namespace must land under
-// distinct Sources keys, not overwrite each other.
+// TestOnSourceUpsert_DifferentKindsDoNotCollide asserts a ConfigMap and an
+// unrelated source kind sharing an object name land under distinct keys.
 func TestOnSourceUpsert_DifferentKindsDoNotCollide(t *testing.T) {
 	w := newTestWatcher(t)
 	cmSource := NewConfigMapSource(&config.Config{})
@@ -309,13 +306,9 @@ func TestOnSourceUpsert_DifferentKindsDoNotCollide(t *testing.T) {
 	}
 }
 
-// TestOnSourceUpsert_ConfigMapAndSecretDoNotCollide is
-// TestOnSourceUpsert_DifferentKindsDoNotCollide's real-implementation
-// counterpart: ConfigMapSource and SecretSource, the two actual registered
-// ConfigSources (see internal/kube/module.go), watching a ConfigMap and a
-// Secret that share the same object name in the same namespace. Proves the
-// two real sources run concurrently without clobbering each other's slice
-// of the merged cache entry, disambiguated purely by Kind() via sourceKey.
+// TestOnSourceUpsert_ConfigMapAndSecretDoNotCollide asserts ConfigMapSource
+// and SecretSource run concurrently without clobbering each other's slice
+// of a merged cache entry, even sharing an object name.
 func TestOnSourceUpsert_ConfigMapAndSecretDoNotCollide(t *testing.T) {
 	w := newTestWatcher(t)
 	cmSource := NewConfigMapSource(&config.Config{})

@@ -13,11 +13,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// ConfigEntry holds the extracted, cached configuration data for a single
-// namespace. Sources is keyed by the name of the object that contributed
-// each slice (e.g. a ConfigMap name) - each source owns its own slice via
-// the patch-based merge in internal/kube/watcher.go, so one source's update
-// never clobbers another's data for the same namespace.
+// ConfigEntry holds cached configuration for a namespace. Sources is keyed
+// by contributing object name; each source owns its own slice so one
+// source's update can't clobber another's (see docs/design.md).
 type ConfigEntry struct {
 	Namespace string
 	Sources   map[string]map[string]any
@@ -25,10 +23,9 @@ type ConfigEntry struct {
 	UpdatedAt time.Time
 }
 
-// Merged returns the flattened view of all sources' data. On key collision
-// across sources, the alphabetically later source name wins - deterministic,
-// but not semantically meaningful. Operators should avoid overlapping keys
-// across multiple sources in the same namespace.
+// Merged returns the flattened view of all sources' data. On key collision,
+// the alphabetically later source name wins (deterministic, not
+// semantically meaningful).
 func (e *ConfigEntry) Merged() map[string]any {
 	out := make(map[string]any)
 	for _, name := range sortedSourceNames(e.Sources) {
@@ -57,9 +54,9 @@ func sortedSourceNames(sources map[string]map[string]any) []string {
 	return names
 }
 
-// Cache holds in-memory configuration state keyed by namespace.
-// Reads use RLock; writes use full Lock. Marked synced after the informer
-// cache completes its initial list+watch cycle.
+// Cache holds in-memory configuration state keyed by namespace, guarded by
+// an RWMutex. Marked synced once the informer completes its initial
+// list+watch cycle.
 type Cache struct {
 	mu          sync.RWMutex
 	byNamespace map[string]*ConfigEntry
@@ -118,11 +115,9 @@ type QueryResult struct {
 	Source string // which config source (e.g. ConfigMap name) this was resolved from.
 }
 
-// ConfigSourceDescriptor describes an active source of configuration data,
-// backing the Describe RPC. Unlike the resolver's previous fixed key
-// vocabulary, ConfigMap (and future bring-your-own-CRD) data has no static
-// leaf-key enumeration - the source's shape (kind, label selector, scope) is
-// the only thing that's actually static.
+// ConfigSourceDescriptor describes an active config source (kind, label
+// selector, scope) for the Describe RPC — the only part of a source's shape
+// that's static, since the underlying data has no fixed key vocabulary.
 type ConfigSourceDescriptor struct {
 	Kind          string
 	LabelSelector string
@@ -139,11 +134,8 @@ type DiscoveryService struct {
 }
 
 // NewDiscoveryService constructs a DiscoveryService with an empty cache.
-// sources describes the config sources actually registered with the
-// watcher (see internal/kube) - the domain layer reports them via Describe
-// but doesn't import internal/kube to build them itself, preserving the
-// domain/transport boundary (internal/app has no k8s.io/controller-runtime
-// dependency).
+// sources comes from the caller so this package stays free of Kubernetes
+// dependencies (see docs/design.md).
 func NewDiscoveryService(cfg *config.Config, log *zap.Logger, sources []ConfigSourceDescriptor) *DiscoveryService {
 	return &DiscoveryService{
 		Cache:         NewCache(),
@@ -212,14 +204,12 @@ func (s *DiscoveryService) Query(ctx context.Context, namespace string, keys []s
 	return results, missing, entry.Revision, nil
 }
 
-// Resolve returns every key currently resolved for a namespace, without
-// requiring the caller to enumerate keys up front. Backs the mutating
-// admission webhook's init container/sidecar - Query stays keys-in/keys-out
-// for callers that already know what they want.
+// Resolve returns every key currently resolved for a namespace, without the
+// caller enumerating keys up front — the counterpart to Query for callers
+// that want everything rather than specific keys.
 //
-// Error Precedence: same as Query, minus the strict/missing-keys case
-// there's nothing to be missing, Resolve returns whatever the namespace
-// currently has.
+// Error Precedence: same as Query, minus strict/missing-keys since there's
+// nothing to be missing.
 func (s *DiscoveryService) Resolve(ctx context.Context, namespace string) ([]QueryResult, string, error) {
 	if !s.Cache.IsSynced() {
 		return nil, "", fmt.Errorf("%w", ErrCacheNotSynced)

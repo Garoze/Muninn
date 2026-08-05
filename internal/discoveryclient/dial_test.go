@@ -13,13 +13,9 @@ import (
 	"time"
 )
 
-// grpc.NewClient never errors synchronously regardless of target validity
-// (confirmed by direct probing against this grpc-go version) - connection
-// establishment, including target parsing, is fully deferred to the first
-// RPC. So there's no "invalid target returns an error from Dial" case to
-// test: Dial's error return only ever fires if grpc.NewClient's signature
-// changes to validate eagerly in a future version, or TLSDialOption fails
-// loading caPath.
+// grpc.NewClient defers connection establishment to the first RPC, so there's
+// no "invalid target" case to test here - Dial's error only fires if
+// TLSDialOption fails loading caPath.
 func TestDial_PlaintextReturnsUsableClientAndConn(t *testing.T) {
 	client, conn, err := Dial("localhost:5010", "")
 	if err != nil {
@@ -71,13 +67,9 @@ func TestTLSDialOption_ValidCA_ReturnsCredsOption(t *testing.T) {
 	}
 }
 
-// generateSelfSignedCA writes a throwaway self-signed CA cert to dir,
-// returning its path. credentials.NewClientTLSFromFile requires a real
-// file on disk, so anything exercising it needs something written out,
-// not just in-memory bytes. Mirrors internal/transport/grpc/server_test.go's
-// generateSelfSignedCert - not shared across packages since both are
-// test-only and this package must not import internal/transport/grpc just
-// for this.
+// generateSelfSignedCA writes a throwaway self-signed CA cert to dir and
+// returns its path, since credentials.NewClientTLSFromFile requires a real
+// file on disk.
 func generateSelfSignedCA(t *testing.T, dir string) (caPath string) {
 	t.Helper()
 

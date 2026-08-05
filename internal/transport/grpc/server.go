@@ -47,15 +47,10 @@ func NewGRPCServer(log *zap.Logger, opts ...grpc.ServerOption) GRPCServerResult 
 	return GRPCServerResult{Server: s, HealthServer: hs}
 }
 
-// TLSServerOption builds a grpc.ServerOption enabling TLS on the gRPC API
-// from cfg.GRPCTLSCertPath/GRPCTLSKeyPath, or returns a nil option when
-// both are unset - the gRPC API's TLS posture is opt-in, unlike the
-// webhook's (see config.Config.WebhookTLSCertPath): some deployments
-// terminate mTLS at a service mesh sidecar and want this server to stay
-// plaintext, others don't run behind a mesh and need TLS terminated here
-// directly. Setting only one of the two paths is a configuration error,
-// not a partial default, since a cert without its key (or vice versa)
-// can't produce a usable TLS config either way.
+// TLSServerOption builds a grpc.ServerOption for TLS from
+// cfg.GRPCTLSCertPath/GRPCTLSKeyPath, or a nil option if both are unset -
+// this server's TLS is opt-in, unlike the webhook's (see docs/design.md).
+// Setting only one of the two paths is an error, not a partial default.
 func TLSServerOption(cfg *config.Config) (grpc.ServerOption, error) {
 	if cfg.GRPCTLSCertPath == "" && cfg.GRPCTLSKeyPath == "" {
 		return nil, nil
@@ -73,12 +68,10 @@ func TLSServerOption(cfg *config.Config) (grpc.ServerOption, error) {
 	return grpc.Creds(creds), nil
 }
 
-// newGRPCServer builds the main *grpc.Server and its *health.Server,
-// wiring in OTel gRPC stats instrumentation and TLS (opt-in, see
-// TLSServerOption). Depends on *sdktrace.TracerProvider explicitly (not
-// otel.GetTracerProvider()'s global) so Fx sequences NewTracerProvider
-// before this runs - otelgrpc.NewServerHandler resolves its TracerProvider
-// once at construction, not lazily per request.
+// newGRPCServer builds the main *grpc.Server and *health.Server, wiring in
+// OTel stats instrumentation and TLS (see TLSServerOption). Takes
+// *sdktrace.TracerProvider explicitly rather than the global, since
+// otelgrpc.NewServerHandler resolves it once at construction, not per call.
 func newGRPCServer(cfg *config.Config, log *zap.Logger, tp *sdktrace.TracerProvider) (*grpc.Server, *health.Server, error) {
 	opts := []grpc.ServerOption{
 		grpc.StatsHandler(otelgrpc.NewServerHandler(otelgrpc.WithTracerProvider(tp))),

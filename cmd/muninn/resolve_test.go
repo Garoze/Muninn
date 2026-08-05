@@ -247,9 +247,8 @@ func TestResolveWatch_PollFailureWithExistingFileLogsAndContinues(t *testing.T) 
 	time.Sleep(80 * time.Millisecond) // let several failed polls happen
 	stopResolveWatch(t, done)
 
-	// Last-good (pre-existing) content stays in place - every poll failed,
-	// but with a file already present, resolveWatch keeps retrying instead
-	// of exiting or clearing the file.
+	// Pre-existing content survives: every poll failed, but resolveWatch
+	// keeps retrying instead of clearing the file.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile: %v", err)
@@ -275,9 +274,8 @@ func TestResolveWatch_ConvergesToLatestValueAcrossTicks(t *testing.T) {
 		done <- resolveWatch(client, "ns1", path, 20*time.Millisecond)
 	}()
 
-	// First tick is immediate; several more follow on the 20ms interval -
-	// enough time for all three scripted responses to be consumed (and then
-	// some, repeating the last one, which the unit test tolerates).
+	// Enough time for all three scripted responses to be consumed, plus a
+	// few repeats of the last one.
 	time.Sleep(150 * time.Millisecond)
 	stopResolveWatch(t, done)
 
@@ -294,10 +292,8 @@ func TestResolveWatch_ConvergesToLatestValueAcrossTicks(t *testing.T) {
 	}
 }
 
-// stopResolveWatch signals SIGTERM to the current process - the same signal
-// resolveWatch's own signal.NotifyContext listens for, and the same one
-// Kubernetes sends a sidecar container on pod termination - then waits for
-// the resolveWatch goroutine under test to return.
+// stopResolveWatch sends SIGTERM (the signal resolveWatch listens for) and
+// waits for its goroutine to return.
 func stopResolveWatch(t *testing.T, done <-chan error) {
 	t.Helper()
 

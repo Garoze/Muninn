@@ -52,10 +52,9 @@ func startServe() (*fx.App, error) {
 	return app, nil
 }
 
-// startWebhook wires the mutating admission webhook HTTP server. This is
-// "muninn webhook". Like NewLogger, the constructors below are called
-// directly rather than pulling in the whole observability.Module - that
-// bundle also brings NewStandaloneHealth, which webhook mode doesn't need.
+// startWebhook wires the mutating admission webhook HTTP server. Constructors
+// are called directly instead of the full observability.Module, which also
+// brings pieces webhook mode doesn't need.
 func startWebhook() (*fx.App, error) {
 	app := fx.New(
 		fx.Provide(config.New),
@@ -79,10 +78,8 @@ func startWebhook() (*fx.App, error) {
 	return app, nil
 }
 
-// printUsage writes the top-level command overview to w. The write error is
-// deliberately discarded: this is help text printed immediately before the
-// program exits or returns, so a failed write (e.g. closed stdout pipe)
-// isn't something the CLI could act on differently.
+// printUsage writes the top-level command overview to w. Write errors are
+// discarded — nothing useful to do with one this close to exit.
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `muninn is the runtime configuration resolver server.
 

@@ -11,14 +11,10 @@ import (
 	"go.uber.org/zap"
 )
 
-// NewServer builds the webhook's HTTPS server. The API server always calls
-// admission webhooks over TLS, so a cert/key pair is required even for
-// local/dev use (see config/webhook/ for the cert-manager wiring that
-// populates cfg.WebhookTLSCertPath/WebhookTLSKeyPath in-cluster). tp is
-// taken as an explicit parameter, not read from otel's global
-// TracerProvider, for the same reason cmd/muninn/main.go's otelgrpc wiring
-// does: otelhttp.NewHandler resolves its TracerProvider once here, at
-// construction, so Fx must sequence NewTracerProvider before this runs.
+// NewServer builds the webhook's HTTPS server. TLS is required unconditionally
+// (the API server only calls admission webhooks over TLS), unlike the gRPC
+// API's optional TLS - see docs/design.md. tp is an explicit parameter rather
+// than otel's global provider since otelhttp resolves it once at construction.
 func NewServer(cfg *config.Config, h *Handler, log *zap.Logger, tp *sdktrace.TracerProvider) (*http.Server, error) {
 	cert, err := tls.LoadX509KeyPair(cfg.WebhookTLSCertPath, cfg.WebhookTLSKeyPath)
 	if err != nil {

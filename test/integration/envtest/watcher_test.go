@@ -109,10 +109,8 @@ func TestWatcherProjection(t *testing.T) {
 		t.Fatalf("create unlabeled configmap: %v", err)
 	}
 
-	// A Secret alongside the ConfigMaps, sharing the same namespace - proves
-	// ConfigMapSource and SecretSource project into the same merged cache
-	// entry against a real kube-apiserver, not just via the in-memory fakes
-	// internal/kube's own unit tests use.
+	// Proves ConfigMapSource and SecretSource project into the same merged
+	// cache entry against a real kube-apiserver.
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "runtime-secret",
@@ -192,7 +190,6 @@ func TestWatcherProjection(t *testing.T) {
 	})
 }
 
-// eventually polls condition every 100ms until it return true or timeout elapses.
 func eventually(t *testing.T, timeout time.Duration, condition func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

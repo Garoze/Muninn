@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	// InjectAnnotation opts a Pod into config injection. Absent ot not
+	// InjectAnnotation opts a Pod into config injection. Absent or not
 	// "true" means the webhook leaves the Pod untouched.
 	InjectAnnotation = "muninn.io/inject"
 
@@ -34,26 +34,15 @@ func ShouldInject(pod *corev1.Pod) bool {
 	return pod.GetAnnotations()[InjectAnnotation] == "true"
 }
 
-// BuildPath return the JSON Path operations needed to inject th shared
+// BuildPath returns the JSON Patch operations needed to inject the shared
 // volume, init container, and sidecar into pod, and to mount that volume
-// into every container the Pod already had - or nil if they're already
-// present. namespace somes from the AdmissionRequest, not pod.Namespace:
-// the request's namespace field is uthoritative at admission time,
-// independent of whether the submitted object's own metadata.namespace was
-// populated by the client.
+// into every existing container - or nil if already present. namespace comes
+// from the AdmissionRequest rather than pod.Namespace, since the latter may
+// be unpopulated by the client at admission time.
 //
-// The existing-container mount is what makes this a zero-client-code
-// integration: without it, a consumer would still need to know Muninn's
-// internal volume name/mount path to read the resolved config themselves.
-//
-// Idempotent via equality.Semantic.DeepEqual: each relevant Pod spec field
-// (volumes, initContainers, containers, each container's volumeMounts) is
-// compared as a whole against the desired value for that field, and a patch
-// op is only emitted when they differ. A webhook re-invoked for the same
-// admission request (the API server can do this) sees every field already
-// equal to its desired value and produces zero ops, not a duplicate
-// volume/container/mount - non-idempotent mutation webhooks cause infinite
-// reconciliation loops against the API server.
+// Idempotent via equality.Semantic.DeepEqual against each relevant Pod spec
+// field: a webhook re-invoked for the same admission request produces zero
+// ops instead of duplicating a volume/container/mount.
 func BuildPath(pod *corev1.Pod, namespace string, cfg *config.Config) []patchOperation {
 	var ops []patchOperation
 
@@ -74,10 +63,6 @@ func BuildPath(pod *corev1.Pod, namespace string, cfg *config.Config) []patchOpe
 	return ops
 }
 
-// volumesOp compares the desired /spec/volumes value (current plus the
-// shared muninn-config volume, unless a volume by that name already exists)
-// against the current value via equality.Semantic.DeepEqual, returning a
-// patch op only when they differ.
 func volumesOp(current []corev1.Volume) *patchOperation {
 	vol := corev1.Volume{
 		Name:         volumeName,
@@ -89,10 +74,8 @@ func volumesOp(current []corev1.Volume) *patchOperation {
 		return nil
 	}
 
-	// JSON Patch's "add" to an array path requires the whole array as the
-	// value when the array doesn't exist yet (nil/empty on a fresh Pod
-	// spec, since corev1.PodSpec.Volumes is omitempty); once it exists,
-	// "replace" is the correct op for a whole-array value.
+	// RFC 6902 "add" requires the whole array when the path doesn't exist
+	// yet; "replace" once it does.
 	if len(current) == 0 {
 		return &patchOperation{Op: "add", Path: "/spec/volumes", Value: desired}
 	}
@@ -129,14 +112,10 @@ func containersOp(current []corev1.Container, namespace string, cfg *config.Conf
 }
 
 // appVolumeMountOps mounts the shared volume into every container the Pod
-// already had at admission time (not the sidecar being injected in this
-// same call - that one mounts itself in buildResolveContainer), so the
-// application itself can read the resolved config file without any change
-// to its own manifest beyond the opt-in annotation. containers is
-// pod.Spec.Containers as decoded from the admission request, so indices
-// here stay valid even after containersOp's /spec/containers replace,
-// which only appends the sidecar and leaves existing entries' positions
-// unchanged.
+// already had, so the application can read the resolved config file with no
+// manifest change beyond the opt-in annotation. Indices index into the
+// original containers slice; containersOp only appends the sidecar, so
+// existing positions stay valid.
 func appVolumeMountOps(containers []corev1.Container) []patchOperation {
 	var ops []patchOperation
 
@@ -167,11 +146,8 @@ func appVolumeMountOps(containers []corev1.Container) []patchOperation {
 	return ops
 }
 
-// withVolume returns vols with vol appended, unless a volume already named
-// vol.Name is present - matched by name, not full equality, so this never
-// introduces a second volume sharing a name the real Kubernetes API would
-// reject as invalid, even if that pre-existing volume's contents differ
-// from what Muninn would have injected.
+// withVolume appends vol unless a volume by that name already exists -
+// matched by name since Kubernetes rejects duplicate volume names.
 func withVolume(vols []corev1.Volume, vol corev1.Volume) []corev1.Volume {
 	for _, v := range vols {
 		if v.Name == vol.Name {
@@ -212,10 +188,8 @@ func withVolumeMount(mounts []corev1.VolumeMount, m corev1.VolumeMount) []corev1
 	return append(out, m)
 }
 
-// buildResolveContainer builds the init container (watch=false, runs once
-// and exists) or sidecar (watch=true, poll and rewrites on drif) - both
-// invoke the same muninn binary in `resolve` mode, just with different
-// arguments.
+// buildResolveContainer builds the init container (watch=false, runs once)
+// or sidecar (watch=true, polls and rewrites on drift).
 func buildResolveContainer(name, namespace string, cfg *config.Config, watch bool) corev1.Container {
 	args := []string{
 		"resolve",
@@ -230,11 +204,8 @@ func buildResolveContainer(name, namespace string, cfg *config.Config, watch boo
 
 	return corev1.Container{
 		Name: name,
-		// Explicit, not left to default: a ":latest" tag (InjectImage's
-		// usual local-dev value) defaults to PullAlways otherwise, which
-		// tries to pull from a registry named "localhost" and fails -
-		// IfNotPresent uses an already-loaded local image but still pulls
-		// in a real registry-backed deployment, unlike PullNever.
+		// Explicit: a ":latest" tag defaults to PullAlways, which fails
+		// against a locally-loaded, unpushed image.
 		Image:           cfg.InjectImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Args:            args,

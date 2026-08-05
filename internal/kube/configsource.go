@@ -12,9 +12,8 @@ import (
 // slice to the per-namespace patch-merge in app.ConfigEntry.
 type ConfigSource interface {
 	// Kind identifies this source for logging, Describe, and as a
-	// namespacing prefix on the ConfigEntry.Sources key (so a ConfigMap
-	// and a same-named custom resource in the same namespace don't
-	// collide as merge sources).
+	// namespacing prefix so same-named objects of different kinds don't
+	// collide as merge sources.
 	Kind() string
 
 	// Watch returns an empty instance of the object type to watch.
@@ -80,17 +79,7 @@ func toAnyMap(m map[string]string) map[string]any {
 }
 
 // SecretSource watches corev1.Secret, scoped by a label selector, and
-// extracts its Data as the config slice. A second, bring-your-own-style
-// ConfigSource implementation alongside ConfigMapSource, proving the
-// interface generalizes beyond the reference type: a different Kubernetes
-// kind, a different label selector, and (unlike ConfigMapSource) a decode
-// step, since corev1.Secret.Data is raw bytes rather than strings.
-//
-// A Secret and a ConfigMap can legitimately share the same name in the same
-// namespace (e.g. both named "app-config") without colliding in the merged
-// cache, because sourceKey prefixes each contributed slice with Kind() -
-// "ConfigMap/app-config" and "Secret/app-config" are distinct
-// ConfigEntry.Sources keys even though the underlying object names match.
+// extracts its Data (raw bytes, decoded to strings) as the config slice.
 type SecretSource struct {
 	labelSelector string
 }

@@ -40,10 +40,9 @@ func TestNewTracerProvider_ServiceNameAttribute(t *testing.T) {
 	}
 }
 
-// TestNewTracerProvider_ZeroRatioDropsUnparentedSpan establishes the
-// baseline the next test depends on: with sampleRatio=0 and no parent, the
-// TraceIDRatioBased sampler is actually wired (not a no-op) and drops the
-// span.
+// TestNewTracerProvider_ZeroRatioDropsUnparentedSpan verifies the
+// TraceIDRatioBased sampler is actually wired (not a no-op): sampleRatio=0
+// drops an unparented span.
 func TestNewTracerProvider_ZeroRatioDropsUnparentedSpan(t *testing.T) {
 	exp := tracetest.NewInMemoryExporter()
 	tp, err := newTracerProvider(exp, 0)
@@ -64,11 +63,9 @@ func TestNewTracerProvider_ZeroRatioDropsUnparentedSpan(t *testing.T) {
 	}
 }
 
-// TestNewTracerProvider_ParentBasedHonorsSampledParent verifies the specific
-// invariant config.go's TraceSampleRatio doc comment commits to: "Uses
-// ParentBased wrapping so inbound sampled traces are always honored." A
-// sampleRatio of 0 would drop an unparented span (previous test) but must
-// NOT drop one whose incoming parent context was already marked sampled.
+// TestNewTracerProvider_ParentBasedHonorsSampledParent verifies ParentBased
+// still records a span whose incoming parent context was already sampled,
+// even with sampleRatio=0.
 func TestNewTracerProvider_ParentBasedHonorsSampledParent(t *testing.T) {
 	exp := tracetest.NewInMemoryExporter()
 	tp, err := newTracerProvider(exp, 0)

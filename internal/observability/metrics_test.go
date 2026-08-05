@@ -18,10 +18,8 @@ func TestNewMetrics_RegistersWithoutPanic(t *testing.T) {
 	}
 }
 
-// TestRequestsTotal_LabelCardinality guards against the label mismatch that
-// previously panicked on every Query call: the metric was once declared with
-// a single "event" label but the transport handler always calls
-// WithLabelValues(operation, result, code) - three values.
+// TestRequestsTotal_LabelCardinality guards against a label-count mismatch
+// panicking WithLabelValues(operation, result, code) calls.
 func TestRequestsTotal_LabelCardinality(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewMetrics(reg)

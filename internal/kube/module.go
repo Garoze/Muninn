@@ -18,12 +18,8 @@ import (
 var Module = fx.Options(
 	fx.Provide(newRestConfig),
 	fx.Provide(NewScheme),
-	// ConfigMapSource and SecretSource are both registered into the
-	// "config_sources" value group - a bring-your-own-CRD source becomes
-	// an additional fx.Provide into the same group, with no change to
-	// NewWatcher or anything downstream of it. SecretSource is the proof:
-	// a second, real ConfigSource implementation running concurrently with
-	// ConfigMapSource, disambiguated in the merged cache purely by Kind().
+	// A bring-your-own ConfigSource is one more fx.Provide into this group,
+	// with no change to NewWatcher or anything downstream of it.
 	fx.Provide(
 		fx.Annotate(NewConfigMapSource,
 			fx.As(new(ConfigSource)),
@@ -36,9 +32,7 @@ var Module = fx.Options(
 			fx.ResultTags(`group:"config_sources"`),
 		),
 	),
-	// filterEnabledSources sits between the raw "config_sources" group and
-	// every consumer of it, so NewWatcher and provideConfigSourceDescriptors
-	// agree on which sources are actually active - Describe reports only
+	// Sits between the raw group and its consumers so Describe reports only
 	// enabled sources, not just registered ones.
 	fx.Provide(
 		fx.Annotate(filterEnabledSources, fx.ParamTags("", `group:"config_sources"`)),
@@ -71,12 +65,9 @@ func filterEnabledSources(cfg *config.Config, sources []ConfigSource) []ConfigSo
 	return out
 }
 
-// provideConfigSourceDescriptors translates the enabled ConfigSources
-// into app.ConfigSourceDescriptor for DiscoveryService.Describe. Lives here
-// (not in internal/app) because ConfigSource depends on
-// sigs.k8s.io/controller-runtime/pkg/client, which internal/app must not
-// import - internal/kube already legitimately imports internal/app, so the
-// translation happens on this side of the boundary.
+// provideConfigSourceDescriptors translates ConfigSources into
+// app.ConfigSourceDescriptor. Lives here, not internal/app, since
+// internal/app must not import controller-runtime types.
 func provideConfigSourceDescriptors(sources []ConfigSource) []app.ConfigSourceDescriptor {
 	out := make([]app.ConfigSourceDescriptor, 0, len(sources))
 	for _, s := range sources {

@@ -10,16 +10,10 @@ import (
 	"github.com/garoze/muninn/internal/config"
 )
 
-// These tests exist because internal/kube/module.go shipped with two real Fx
-// wiring bugs (fixed 2026-08-04) that nothing else in this package caught:
-// NewConfigMapSource was provided into the "config_sources" value group under
-// its concrete type with no fx.As(new(ConfigSource)), and
-// provideConfigSourceDescriptors had no fx.ParamTags at all, so its
-// []ConfigSource parameter resolved against a nonexistent ungrouped provider
-// instead of the group. Every other test in this package constructs
-// Watcher/DiscoveryService directly, bypassing Fx entirely - these are the
-// only tests that build the real dependency graph, the same way muninn serve
-// does.
+// These tests build the real Fx dependency graph (unlike the rest of this
+// package, which constructs Watcher/DiscoveryService directly) - only this
+// path exercises value-group wiring mistakes like a missing fx.As or
+// fx.ParamTags.
 
 func testConfig() *config.Config {
 	return &config.Config{ConfigMapLabelSelector: "muninn.io/config=runtime"}
@@ -45,10 +39,6 @@ func TestConfigSourcesGroup_ResolvesAsInterfaceSlice(t *testing.T) {
 	}
 }
 
-// TestConfigSourcesGroup_MultipleSourcesCompose is the Fx-graph-level version
-// of watcher_test.go's TestOnSourceUpsert_DifferentKindsDoNotCollide: proof
-// that a second ConfigSource really does slot in as "one more fx.Provide,"
-// the claim internal/kube/module.go's own comment makes.
 func TestConfigSourcesGroup_MultipleSourcesCompose(t *testing.T) {
 	var sources []ConfigSource
 
@@ -75,11 +65,6 @@ func newFakeSourceForFx() ConfigSource {
 	return &fakeSource{kind: "Fake"}
 }
 
-// TestConfigSourcesGroup_ConfigMapAndSecretBothRegister is the real-source
-// counterpart to TestConfigSourcesGroup_MultipleSourcesCompose: both
-// ConfigMapSource and SecretSource - the two sources actually wired in
-// internal/kube/module.go's Module - resolve out of the "config_sources" Fx
-// value group together, each satisfying the ConfigSource interface tag.
 func TestConfigSourcesGroup_ConfigMapAndSecretBothRegister(t *testing.T) {
 	var sources []ConfigSource
 
@@ -108,10 +93,7 @@ func TestConfigSourcesGroup_ConfigMapAndSecretBothRegister(t *testing.T) {
 	}
 }
 
-// fxGraphWithFilter builds the fx.Provide chain shared by the tests below:
-// the raw "config_sources" group, through filterEnabledSources, matching
-// how internal/kube/module.go actually wires both NewWatcher and
-// provideConfigSourceDescriptors today.
+// fxGraphWithFilter builds the fx.Provide chain shared by the tests below.
 func fxGraphWithFilter(cfg *config.Config, extra ...fx.Option) []fx.Option {
 	return append([]fx.Option{
 		fx.Provide(func() *config.Config { return cfg }),
@@ -143,9 +125,7 @@ func TestProvideConfigSourceDescriptors_PullsFromFilteredSources(t *testing.T) {
 }
 
 // TestProvideConfigSourceDescriptors_ExcludedSourceIsNotDescribed proves
-// Describe only reports enabled sources, not just registered ones - the
-// filter sits ahead of provideConfigSourceDescriptors too, not only
-// NewWatcher.
+// Describe reports only enabled sources, not just registered ones.
 func TestProvideConfigSourceDescriptors_ExcludedSourceIsNotDescribed(t *testing.T) {
 	var descriptors []app.ConfigSourceDescriptor
 

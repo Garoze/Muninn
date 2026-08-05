@@ -111,9 +111,8 @@ func (h *DiscoveryHandler) Describe(_ context.Context, _ *discoveryv1.DescribeRe
 const resolveMethod = "/discovery.v1.DiscoveryService/Resolve"
 
 // Resolve translates a gRPC ResolveRequest into a domain Resolve call,
-// records metrics and logs, and maps results back to proto types. Same
-// translation shape as Query, minus keys/stric
-// (Resolve returns everything)
+// records metrics and logs, and maps results back to proto types. Unlike
+// Query, it takes no keys and returns everything resolved for the namespace.
 func (h *DiscoveryHandler) Resolve(ctx context.Context, req *discoveryv1.ResolveRequest) (*discoveryv1.ResolveResponse, error) {
 	start := time.Now()
 

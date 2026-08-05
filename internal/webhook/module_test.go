@@ -29,11 +29,9 @@ import (
 	"github.com/garoze/muninn/internal/observability"
 )
 
-// TestModule_StartsAndServesRealHTTPS builds the real Fx Module - the same
-// wiring `muninn webhook` uses - generates a throwaway self-signed cert,
-// starts it on a real local port, and sends it a real HTTPS request. This
-// is the automated form of the manual curl verification this webhook was
-// originally checked with by hand.
+// TestModule_StartsAndServesRealHTTPS builds the real Fx Module, starts it on
+// a real local port with a throwaway self-signed cert, and sends it a real
+// HTTPS request.
 func TestModule_StartsAndServesRealHTTPS(t *testing.T) {
 	dir := t.TempDir()
 	certPath, keyPath := generateSelfSignedCert(t, dir)

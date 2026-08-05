@@ -23,16 +23,14 @@ var Module = fx.Options(
 	fx.Invoke(ShutdownTracerProvider),
 )
 
-// NewLogger constructs the shared production zap.Logger, used by every
-// muninn process mode (serve, webhook).
+// NewLogger constructs the shared production zap.Logger.
 func NewLogger() (*zap.Logger, error) {
 	return zap.NewProduction()
 }
 
-// StartMetricsServer registers an OnStart/OnStop hook that serves /metrics,
-// so both serve (via Module) and webhook (called directly, to avoid
-// pulling in the gRPC-listener/tracer-provider pieces webhook mode doesn't
-// need from Module) expose it the same way.
+// StartMetricsServer registers an OnStart/OnStop hook that serves /metrics.
+// Exported separately from Module so callers can start it without pulling
+// in unrelated dependencies.
 func StartMetricsServer(lc fx.Lifecycle, cfg *config.Config, log *zap.Logger) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
@@ -60,9 +58,9 @@ func StartMetricsServer(lc fx.Lifecycle, cfg *config.Config, log *zap.Logger) {
 	})
 }
 
-// ShutdownTracerProvider registers an OnStop hook that shuts tp down,
-// so both serve (via Module) and webhook (called directly, to avoid
-// pulling in the pieces webhook mode doesn't need) release it the same way.
+// ShutdownTracerProvider registers an OnStop hook that shuts tp down.
+// Exported separately from Module so callers can release it without pulling
+// in unrelated dependencies.
 func ShutdownTracerProvider(lc fx.Lifecycle, tp *sdktrace.TracerProvider) {
 	lc.Append(fx.Hook{
 		OnStop: func(ctx context.Context) error {

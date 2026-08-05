@@ -142,12 +142,8 @@ func TestTLSServerOption_ValidCert_ReturnsCredsOption(t *testing.T) {
 }
 
 // generateSelfSignedCert writes a throwaway self-signed cert/key pair to
-// dir, returning their paths. credentials.NewServerTLSFromFile requires
-// real files on disk, so anything exercising it needs something written
-// out, not just in-memory bytes. Mirrors internal/webhook/module_test.go's
-// helper of the same name/shape - not shared across packages since both
-// are test-only and internal/webhook must not import internal/transport/grpc
-// just for this.
+// dir, returning their paths - credentials.NewServerTLSFromFile requires
+// real files on disk, not in-memory bytes.
 func generateSelfSignedCert(t *testing.T, dir string) (certPath, keyPath string) {
 	t.Helper()
 

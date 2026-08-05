@@ -35,7 +35,7 @@ import (
 
 const (
 	deployNamespace = "muninn-system"
-	localPort       = 15010 // avoid colliding with a locally-running `make run`
+	localPort       = 15010 // distinct from `make run`'s default port
 	podPort         = 5010
 	e2eNamespace    = "e2e-test-ns"
 )
@@ -45,11 +45,10 @@ var webhookAppLabels = client.MatchingLabels{"app": "muninn-webhook"}
 
 const injectPodName = "e2e-inject-test"
 
-// TestE2E deploys Muninn in-cluster via the real `make deploy` target,
-// exercises it through the actual gRPC wire protocol over a port-forward,
-// and tears down via `make undeploy`. Requires a real cluster and the image
-// already built and loaded (`make image load`) — this test does not do
-// either itself, since `make load` needs interactive sudo.
+// TestE2E deploys Muninn in-cluster via `make deploy` and exercises it
+// through the real gRPC wire protocol over a port-forward. Requires a real
+// cluster with the image already built and loaded (`make image load`) -
+// not done here, since `make load` needs interactive sudo.
 func TestE2E(t *testing.T) {
 	if os.Getenv("MUNINN_IT_E2E") != "1" {
 		t.Skip("set MUNINN_IT_E2E=1 to run e2e tests against a real cluster")
@@ -179,14 +178,8 @@ func TestE2E(t *testing.T) {
 		runMake(t, repoRoot, "deploy-webhook")
 		t.Cleanup(func() { runMake(t, repoRoot, "undeploy-webhook") })
 
-		// Scope the cluster-wide MutatingWebhookConfiguration to only this
-		// test's namespace before anything can trigger it. failurePolicy:
-		// Fail means a misbehaving webhook backend blocks every Pod create
-		// cluster-wide, not just annotated ones - config/webhook/webhook.yaml
-		// ships with no namespaceSelector since that's the correct default
-		// for a real deployment, but an automated test run needs the same
-		// bounded blast radius the manual verification of this feature used
-		// (see docs/design.md's Testing strategy).
+		// Bound the blast radius before anything can trigger the webhook -
+		// failurePolicy: Fail would otherwise block Pod admission cluster-wide.
 		scopeWebhookToNamespace(t, k8sClient, e2eNamespace)
 
 		if podName := waitForPodReady(t, k8sClient, deployNamespace, 60*time.Second, webhookAppLabels); podName == "" {
@@ -215,12 +208,8 @@ func TestE2E(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = k8sClient.Delete(context.Background(), injectPod) })
 
-		// 120s, not 60s: unlike every other image this test suite uses
-		// (localhost/muninn:latest, pre-loaded via `make image load`),
-		// busybox is pulled from a real registry on first use - a cold
-		// pull plus injection plus init-container completion can
-		// meaningfully exceed the tighter budget the rest of this test
-		// uses for pre-loaded images.
+		// 120s: busybox is pulled from a real registry, unlike this suite's
+		// other pre-loaded images.
 		if podName := waitForPodReady(t, k8sClient, e2eNamespace, 120*time.Second, client.MatchingLabels{"app": injectPodName}); podName == "" {
 			t.Fatal("annotated pod never reached Ready - webhook injection may not have run, or busybox:1.36 pull timed out")
 		}
@@ -231,9 +220,7 @@ func TestE2E(t *testing.T) {
 		}, "injected config file never appeared with the expected resolved values")
 
 		// Drift: edit the source ConfigMap and confirm the sidecar rewrites
-		// the file in place, with no Pod restart - the actual "config as a
-		// file, not just an API" claim, proven live rather than by reading
-		// the sidecar's polling code.
+		// the file in place, with no Pod restart.
 		patch := client.MergeFrom(cm.DeepCopy())
 		cm.Data["DISPLAY_NAME"] = "E2E Test Namespace Updated"
 		if err := k8sClient.Patch(context.Background(), cm, patch); err != nil {
@@ -247,9 +234,7 @@ func TestE2E(t *testing.T) {
 	})
 }
 
-// repoRoot resolves the project root relative to this file
-// (test/e2e/ -> ../.. -> project root), so `make` runs with the right cwd
-// regardless of the test binary's own working directory.
+// repoRoot resolves the project root regardless of the test binary's cwd.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -259,16 +244,15 @@ func repoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
 }
 
-// loadKubeConfig resolves the kubeconfig the same way kubectl does: $KUBECONFIG
-// (colon-separated on non-Windows), falling back to ~/.kube/config.
+// loadKubeConfig resolves the kubeconfig the same way kubectl does.
 func loadKubeConfig() (*rest.Config, error) {
 	rules := clientcmd.NewDefaultClientConfigLoadingRules()
 	overrides := &clientcmd.ConfigOverrides{}
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides).ClientConfig()
 }
 
-// runMake runs `make <target>` with cwd set to the project root, failing the
-// test with the command's combined output on error.
+// runMake runs `make <target>` from the project root, failing the test with
+// the command's combined output on error.
 func runMake(t *testing.T, repoRoot, target string) {
 	t.Helper()
 	cmd := exec.Command("make", target)
@@ -306,28 +290,17 @@ func waitForPodReady(t *testing.T, k8sClient client.Client, namespace string, ti
 }
 
 // certManagerInstalled reports whether the cert-manager namespace exists -
-// a real external prerequisite this repo doesn't install (see README
-// Prerequisites), needed by config/webhook/issuer.yaml and certificate.yaml.
+// an external prerequisite this repo doesn't install (see README).
 func certManagerInstalled(k8sClient client.Client) bool {
 	var ns corev1.Namespace
 	err := k8sClient.Get(context.Background(), client.ObjectKey{Name: "cert-manager"}, &ns)
 	return err == nil
 }
 
-// scopeWebhookToNamespace patches the muninn-webhook MutatingWebhookConfiguration
-// to only intercept Pod creates in namespace, via the built-in
-// kubernetes.io/metadata.name label every Namespace carries. Necessary
-// before creating any Pod once the webhook is deployed: config/webhook/webhook.yaml
-// ships with failurePolicy: Fail and no namespaceSelector, which is the
-// correct default for a real deployment but means an unscoped webhook
-// backend problem blocks Pod admission cluster-wide, not just in this
-// test's own namespace.
-//
-// Wrapped in retry.RetryOnConflict rather than a single Get+Update: cert-manager's
-// cainjector controller actively patches this same object right after
-// `make deploy-webhook` applies it (to populate the CA bundle), so a plain
-// Get-then-Update races that write and fails with a resourceVersion
-// conflict - confirmed live against a real cluster, not a hypothetical.
+// scopeWebhookToNamespace patches the MutatingWebhookConfiguration to only
+// intercept Pod creates in namespace. Retries on conflict because
+// cert-manager's cainjector concurrently patches the same object to
+// populate the CA bundle.
 func scopeWebhookToNamespace(t *testing.T, k8sClient client.Client, namespace string) {
 	t.Helper()
 
@@ -351,8 +324,7 @@ func scopeWebhookToNamespace(t *testing.T, k8sClient client.Client, namespace st
 }
 
 // execInPod runs cmd in container of the Pod named podName, returning
-// combined stdout. Used to read the webhook-injected config file back out
-// of a running consumer Pod, the same way a human would with `kubectl exec`.
+// combined stdout.
 func execInPod(cfg *rest.Config, clientset *kubernetes.Clientset, namespace, podName, container string, cmd []string) (string, error) {
 	req := clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
@@ -382,9 +354,8 @@ func execInPod(cfg *rest.Config, clientset *kubernetes.Clientset, namespace, pod
 	return stdout.String(), nil
 }
 
-// checkNotImagePullError logs a clearer skip/failure hint when the Pod never
-// became Ready because the image isn't loaded into the node's containerd
-// store — the one prerequisite this test deliberately doesn't set up itself.
+// checkNotImagePullError skips with a clearer hint when the Pod isn't Ready
+// because the image isn't loaded into the node's containerd store.
 func checkNotImagePullError(t *testing.T, k8sClient client.Client, namespace string) {
 	t.Helper()
 	var pods corev1.PodList
@@ -403,10 +374,9 @@ func checkNotImagePullError(t *testing.T, k8sClient client.Client, namespace str
 	}
 }
 
-// startPortForward opens a port-forward to podName using client-go directly
-// (not a `kubectl port-forward` subprocess) so its lifecycle — readiness,
-// shutdown on stopCh — is reliable to manage from a test rather than
-// parsing another process's stdout/killing it on cleanup.
+// startPortForward opens a port-forward to podName via client-go directly,
+// so lifecycle/shutdown is reliable to manage rather than driving a
+// `kubectl port-forward` subprocess.
 func startPortForward(
 	t *testing.T,
 	cfg *rest.Config,
@@ -450,8 +420,6 @@ func startPortForward(
 	return errCh
 }
 
-// eventually polls condition every 100ms until it returns true or timeout
-// elapses.
 func eventually(t *testing.T, timeout time.Duration, condition func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

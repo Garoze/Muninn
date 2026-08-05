@@ -62,10 +62,7 @@ func TestServeHTTP_ValidReview_AllowsAndEchoesUID(t *testing.T) {
 }
 
 // TestServeHTTP_MissingObject_AllowsUnmodified covers a request with no
-// "object" field (Object.Raw empty) - this webhook runs against every Pod
-// create in the cluster under failurePolicy: Fail, so a decode failure here
-// must not block admission for unrelated Pods; it should just skip
-// injection and allow.
+// "object" field - must skip injection and allow, not block admission.
 func TestServeHTTP_MissingObject_AllowsUnmodified(t *testing.T) {
 	h := newTestHandler(t)
 
@@ -152,11 +149,8 @@ func TestServeHTTP_AnnotatedPod_InjectsPatch(t *testing.T) {
 		t.Errorf("PatchType: got %v, want JSONPatch", review.Response.PatchType)
 	}
 
-	// Decode the actual patch content, not just its presence - this is
-	// what would have caught the addVolumeOp/addInitContainerOp bugs found
-	// via manual curl verification (both applied cleanly with Patch != nil,
-	// but the volume was silently empty and the initContainers path was
-	// wrong).
+	// Decode the actual patch content, not just its presence: a non-nil
+	// patch can still carry an empty or malformed op value.
 	var ops []patchOperation
 	if err := json.Unmarshal(review.Response.Patch, &ops); err != nil {
 		t.Fatalf("decode patch: %v", err)

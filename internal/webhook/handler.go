@@ -53,12 +53,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Allowed: true,
 	}
 
-	// A decode failure here only ever means this webhook can't evaluate
-	// injection for this one Pod - it never means the Pod itself is
-	// invalid. With failurePolicy: Fail, this webhook runs against every
-	// Pod create in the cluster, not just annotated ones, so failing
-	// closed here would block admission for unrelated Pods over a
-	// best-effort, opt-in feature. Log and allow unmodified instead.
+	// Fail open: failurePolicy: Fail means a decode error here would block
+	// admission for every Pod in the cluster, not just annotated ones.
 	var pod corev1.Pod
 	if err := json.Unmarshal(review.Request.Object.Raw, &pod); err != nil {
 		h.log.Warn("failed to decode Pod from AdmissionRequest, skipping injection",

@@ -54,8 +54,7 @@ func cmdResolve(args []string) error {
 }
 
 // resolveOnce performs a single Resolve call and writes the result to out
-// unconditionally. Used for the init container's one-time write at Pod
-// admission.
+// unconditionally.
 func resolveOnce(ctx context.Context, client discoveryv1.DiscoveryServiceClient, namespace, out string) error {
 	reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -73,17 +72,12 @@ func resolveOnce(ctx context.Context, client discoveryv1.DiscoveryServiceClient,
 	return writeFileAtomic(out, data)
 }
 
-// resolveWatch polls Resolve every interval and rewrites out only when the
-// resolved data actually changed since the last write. Used by the sidecar
-// to detect drift without restarting the consuming container.
+// resolveWatch polls Resolve on interval and rewrites out only when the data
+// changed since the last write.
 //
-// A failed poll is fatal only if out doesn't exist yet - with nothing for
-// the consuming container to fall back on, silently retrying forever would
-// leave a broken pod with no visible failure signal. Once out exists (from
-// an earlier successful tick, or from the init container that normally runs
-// before this sidecar starts), a failed poll is logged and skipped instead:
-// the last-good file stays in place, and one bad poll shouldn't take the
-// pod down when there's already something usable on disk.
+// A poll failure is fatal only if out doesn't exist yet; once a file
+// exists, a failure is logged and skipped so a stale-but-usable file stays
+// in place rather than failing on one bad poll.
 func resolveWatch(client discoveryv1.DiscoveryServiceClient, namespace, out string, interval time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -138,11 +132,8 @@ func resolveWatch(client discoveryv1.DiscoveryServiceClient, namespace, out stri
 	}
 }
 
-// pollFailure decides whether a resolveWatch tick's failure is recoverable.
-// If out already exists, there's a last-good file to fall back on: log and
-// let the caller keep polling. If out doesn't exist, there's nothing to
-// fall back on, so the failure is returned instead of silently retried
-// forever.
+// pollFailure returns nil (recoverable, logged) if out already exists, or
+// an error if there's no fallback file yet.
 func pollFailure(out, msg string, err error) error {
 	if _, statErr := os.Stat(out); statErr == nil {
 		fmt.Fprintf(os.Stderr, "[muninn] warning: %s: %v\n", msg, err)

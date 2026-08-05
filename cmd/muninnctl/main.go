@@ -17,10 +17,8 @@ import (
 
 const defaultAddr = "localhost:5010"
 
-// printUsage writes the top-level command overview to w. The write error is
-// deliberately discarded: this is help text printed immediately before the
-// program exits or returns, so a failed write (e.g. closed stdout pipe)
-// isn't something the CLI could act on differently.
+// printUsage writes the top-level command overview to w. Write errors are
+// discarded — nothing useful to do with one this close to exit.
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `muninnctl is a CLI client for Muninn's gRPC Query API.
 
@@ -35,11 +33,8 @@ Use "muninnctl <command> --help" for more information about a given command.
 `)
 }
 
-// setFlagUsage overrides fs's default help output with kubectl's own leaf
-// command layout: a short description, the "-x, --name" flag listing (via
-// pflag's FlagUsages, the same formatting kubectl itself uses), and a
-// trailing "Usage:" line. Write error discarded for the same reason as
-// printUsage above.
+// setFlagUsage mirrors kubectl's leaf-command help layout via pflag's
+// FlagUsages. Write errors discarded, same reasoning as printUsage.
 func setFlagUsage(fs *pflag.FlagSet, name, desc string) {
 	fs.Usage = func() {
 		w := fs.Output()
@@ -148,12 +143,8 @@ func cmdDescribe(args []string) error {
 }
 
 // formatQueryResponse writes query results as tab-aligned columns to w.
-// Extracted so it can be unit-tested without a live server.
-//
-// Writes into tw are deliberately unchecked: tabwriter buffers them
-// internally and only performs real I/O on Flush, so the first genuine
-// write failure surfaces there (or on the direct write to w below), not on
-// any individual buffered call.
+// Writes into tw are unchecked: tabwriter buffers them and only performs
+// real I/O on Flush, so the first genuine failure surfaces there instead.
 func formatQueryResponse(w io.Writer, resp *discoveryv1.QueryResponse) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "KEY\tVALUE\tSOURCE")
@@ -177,8 +168,7 @@ func formatQueryResponse(w io.Writer, resp *discoveryv1.QueryResponse) error {
 }
 
 // formatDescribeResponse writes active config sources as tab-aligned columns
-// to w. Extracted so it can be unit-tested without a live server. See
-// formatQueryResponse for why writes into tw are unchecked.
+// to w. See formatQueryResponse for why writes into tw are unchecked.
 func formatDescribeResponse(w io.Writer, resp *discoveryv1.DescribeResponse) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "KIND\tLABEL SELECTOR\tSCOPE")
