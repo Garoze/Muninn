@@ -11,17 +11,14 @@ import (
 // data. Each source owns its own informer and contributes its own named
 // slice to the per-namespace patch-merge in app.ConfigEntry.
 type ConfigSource interface {
-	// Kind identifies this source's type for logging, Describe, and
-	// ENABLED_CONFIG_SOURCES matching. Not necessarily unique across
-	// registered sources - two sources of the same kind (e.g. ConfigMaps
-	// scoped by different label selectors) share a Kind by design.
+	// Kind identifies this source's type, for logging, Describe, and
+	// ENABLED_CONFIG_SOURCES matching. Sources of the same type share a
+	// Kind by design.
 	Kind() string
 
-	// KeyPrefix namespaces this source's contributed slice within a merge
-	// target's Sources map, so co-registered sources don't collide when
-	// they share a Kind and watch same-named objects. Distinct from Kind:
-	// a source with no reason to differentiate itself from siblings of
-	// the same kind can return its own Kind() here.
+	// KeyPrefix namespaces this source's slice of a merge target's
+	// Sources map, distinct from Kind so two sources sharing a Kind can
+	// still avoid colliding on a shared object name.
 	KeyPrefix() string
 
 	// Watch returns an empty instance of the object type to watch.
@@ -58,9 +55,8 @@ func NewConfigMapSource(cfg *config.Config) *ConfigMapSource {
 
 func (s *ConfigMapSource) Kind() string { return "ConfigMap" }
 
-// KeyPrefix falls back to Kind when unset, which is every source
-// registered today - no caller needs a distinct prefix until a second
-// ConfigMapSource instance is registered alongside this one.
+// KeyPrefix falls back to Kind when unset - correct as long as only one
+// source of this kind is registered.
 func (s *ConfigMapSource) KeyPrefix() string {
 	if s.keyPrefix != "" {
 		return s.keyPrefix

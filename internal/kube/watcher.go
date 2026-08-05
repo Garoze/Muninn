@@ -349,17 +349,14 @@ func (w *Watcher) onSourceDelete(src ConfigSource) func(any) {
 }
 
 // sourceKey identifies obj's contributed slice within ConfigEntry.Sources.
-// Prefixed by the source's KeyPrefix so co-registered sources sharing an
-// object name don't collide as merge sources - including two sources of
-// the same Kind, which KeyPrefix alone (not Kind) can distinguish.
+// Prefixed by KeyPrefix rather than Kind so co-registered sources of the
+// same Kind sharing an object name don't collide as merge sources.
 func sourceKey(src ConfigSource, obj client.Object) string {
 	return src.KeyPrefix() + "/" + obj.GetName()
 }
 
-// validateDistinctKeyPrefixes fails fast at startup if two registered
-// sources would silently overwrite each other's cache entries, turning the
-// runtime data-loss scenario KeyPrefix guards against into a construction
-// error instead.
+// validateDistinctKeyPrefixes fails construction if two sources would
+// silently overwrite each other's cache entries at runtime.
 func validateDistinctKeyPrefixes(sources []ConfigSource) error {
 	seen := make(map[string]string, len(sources))
 	for _, src := range sources {

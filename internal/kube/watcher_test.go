@@ -287,9 +287,6 @@ func TestOnSourceDelete_ClearsOwnSourceOnly(t *testing.T) {
 
 // TestOnSourceUpsert_DifferentKindsDoNotCollide asserts a ConfigMap and an
 // unrelated source kind sharing an object name land under distinct keys.
-// See TestOnSourceUpsert_SameKindDistinctPrefixDoNotCollide and
-// TestOnSourceUpsert_SameKindSamePrefixStillCollides below for the same-Kind
-// case, which Kind() alone can't distinguish - only KeyPrefix() can.
 func TestOnSourceUpsert_DifferentKindsDoNotCollide(t *testing.T) {
 	w := newTestWatcher(t)
 	cmSource := NewConfigMapSource(&config.Config{})
@@ -316,11 +313,9 @@ func TestOnSourceUpsert_DifferentKindsDoNotCollide(t *testing.T) {
 	}
 }
 
-// TestOnSourceUpsert_SameKindDistinctPrefixDoNotCollide is the happy path:
-// two sources sharing a Kind (as two ConfigMapSources scoped by different
-// label selectors would) but registered with distinct KeyPrefix values
-// don't clobber each other, even watching an object of the same name in
-// the same namespace.
+// TestOnSourceUpsert_SameKindDistinctPrefixDoNotCollide asserts two
+// sources sharing a Kind but registered with distinct KeyPrefix values
+// don't clobber each other on a shared object name.
 func TestOnSourceUpsert_SameKindDistinctPrefixDoNotCollide(t *testing.T) {
 	w := newTestWatcher(t)
 	base := &fakeSource{kind: "ConfigMap", keyPrefix: "ConfigMap:base", data: map[string]any{"LOG_LEVEL": "info"}}
@@ -349,12 +344,9 @@ func TestOnSourceUpsert_SameKindDistinctPrefixDoNotCollide(t *testing.T) {
 	}
 }
 
-// TestOnSourceUpsert_SameKindSamePrefixStillCollides is the negative path:
-// two sources sharing both a Kind and a KeyPrefix (the default when neither
-// source sets one) do still overwrite each other when they watch an object
-// of the same name. This isn't a residual bug - KeyPrefix only prevents a
-// collision when a source author actually differentiates co-registered
-// siblings; it's on the registration, not automatic.
+// TestOnSourceUpsert_SameKindSamePrefixStillCollides asserts two sources
+// sharing both a Kind and a KeyPrefix still overwrite each other on a
+// shared object name.
 func TestOnSourceUpsert_SameKindSamePrefixStillCollides(t *testing.T) {
 	w := newTestWatcher(t)
 	first := &fakeSource{kind: "ConfigMap", data: map[string]any{"LOG_LEVEL": "info"}}
@@ -409,12 +401,6 @@ func TestNewWatcher_InvalidLabelSelectorErrors(t *testing.T) {
 	}
 }
 
-// TestValidateDistinctKeyPrefixes_DuplicateErrors is the fail-fast
-// counterpart to the runtime negative-path test in
-// TestOnSourceUpsert_SameKindSamePrefixStillCollides - two sources that
-// would silently overwrite each other's cache entries fail this check
-// instead of colliding at runtime. Wired into NewWatcher so it happens at
-// startup, before any informer is registered.
 func TestValidateDistinctKeyPrefixes_DuplicateErrors(t *testing.T) {
 	sources := []ConfigSource{
 		&fakeSource{kind: "ConfigMap"},
@@ -425,9 +411,6 @@ func TestValidateDistinctKeyPrefixes_DuplicateErrors(t *testing.T) {
 	}
 }
 
-// TestValidateDistinctKeyPrefixes_DistinctSucceeds is the happy-path
-// counterpart: two sources sharing a Kind but registered with distinct
-// KeyPrefix values don't trip the check.
 func TestValidateDistinctKeyPrefixes_DistinctSucceeds(t *testing.T) {
 	sources := []ConfigSource{
 		&fakeSource{kind: "ConfigMap", keyPrefix: "ConfigMap:base"},
@@ -438,8 +421,6 @@ func TestValidateDistinctKeyPrefixes_DistinctSucceeds(t *testing.T) {
 	}
 }
 
-// TestNewWatcher_DuplicateKeyPrefixErrors confirms the check above is
-// actually wired into NewWatcher, not just defined and unused.
 func TestNewWatcher_DuplicateKeyPrefixErrors(t *testing.T) {
 	scheme, err := NewScheme()
 	if err != nil {

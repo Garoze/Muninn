@@ -28,9 +28,6 @@ func TestConfigMapSource_KindWatchListLabelSelectorScope(t *testing.T) {
 	}
 }
 
-// TestConfigMapSource_KeyPrefixDefaultsToKind locks in that a single source
-// per Kind - every source registered in this repo today - produces the same
-// cache key it always has, unaffected by KeyPrefix's addition.
 func TestConfigMapSource_KeyPrefixDefaultsToKind(t *testing.T) {
 	src := NewConfigMapSource(&config.Config{})
 	if src.KeyPrefix() != src.Kind() {
