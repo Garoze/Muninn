@@ -50,7 +50,7 @@ func TestNew_EnvOverrides(t *testing.T) {
 	t.Setenv("CACHE_ENTRY_TTL", "30s")
 	t.Setenv("STARTUP_TIMEOUT", "5m")
 	t.Setenv("MUNINN_SELF_ADDR", "muninn.other-ns.svc.cluster.local:5010")
-	t.Setenv("ENABLED_CONFIG_SOURCES", "ConfigMap, Secret")
+	t.Setenv("ENABLED_CONFIG_SOURCES", "ConfigMap, CustomSource")
 	t.Setenv("GRPC_TLS_CERT_PATH", "/etc/muninn/grpc-tls/tls.crt")
 	t.Setenv("GRPC_TLS_KEY_PATH", "/etc/muninn/grpc-tls/tls.key")
 
@@ -86,7 +86,7 @@ func TestNew_EnvOverrides(t *testing.T) {
 	if cfg.SelfAddr != "muninn.other-ns.svc.cluster.local:5010" {
 		t.Errorf("SelfAddr: got %q", cfg.SelfAddr)
 	}
-	wantSources := []string{"ConfigMap", "Secret"}
+	wantSources := []string{"ConfigMap", "CustomSource"}
 	if !slicesEqual(cfg.EnabledConfigSources, wantSources) {
 		t.Errorf("EnabledConfigSources: got %v, want %v", cfg.EnabledConfigSources, wantSources)
 	}
