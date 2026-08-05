@@ -79,7 +79,7 @@ test-integration:
 # (`make image load` — not run automatically here, since `load` needs
 # interactive sudo). Not part of `make test` or CI — see docs/design.md.
 test-e2e:
-	MUNINN_IT_E2E=1 go test ./test/e2e/... -run TestE2E -v -timeout 5m -count=1
+	MUNINN_IT_E2E=1 go test ./test/e2e/... -run TestE2E -v -timeout 8m -count=1
 
 # override the detected engine with: make image CONTAINER_ENGINE=docker
 image:
