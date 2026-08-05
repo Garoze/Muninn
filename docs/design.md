@@ -99,7 +99,8 @@ Five responsibilities, each isolated from the others:
 - A **domain layer** that owns the cache and the resolution logic against
   it, with no awareness of Kubernetes or any transport protocol.
 - A **transport layer** that turns gRPC requests into domain calls and
-  domain results back into gRPC responses.
+  domain results back into gRPC responses, and stands up the gRPC server
+  those requests arrive on (listener binding, optional TLS).
 - A **delivery layer** (the mutating admission webhook) that, for
   opted-in Pods, injects a shared volume plus an init container and
   sidecar that call the gRPC API on the Pod's behalf and write the result
@@ -152,7 +153,7 @@ graph.
 |---|---|---|
 | Watch layer | Translating source-object events into cache updates, across a pluggable set of source kinds | Answering queries, holding request state |
 | Domain layer | Cached scope state, resolution logic, readiness state | Anything protocol-specific (Kubernetes or gRPC) |
-| Transport layer | Request/response translation, error-to-status-code mapping | Business logic — it delegates every query to the domain layer |
+| Transport layer | Request/response translation, error-to-status-code mapping, standing up the gRPC server (listener, optional TLS) those requests arrive on | Business logic — it delegates every query to the domain layer |
 | Delivery layer (webhook) | Deciding whether a Pod opted in, building the injection patch | Resolving configuration itself — it delegates that to the same gRPC API direct callers use |
 | Observability layer | Metrics, structured logging, distributed tracing | Influencing request outcomes |
 

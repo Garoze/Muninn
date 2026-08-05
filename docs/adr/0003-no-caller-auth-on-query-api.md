@@ -28,10 +28,12 @@ callers.
 As built, network reachability is the only access control on this API —
 including for the shared gRPC dial helper used by both the debugging CLI
 and the admission webhook's injected init container/sidecar, which
-connect over plaintext for the same reason. This is a stated limitation,
-not an oversight — a genuine production deployment of this pattern would
-need to sit behind cluster-internal network policy or mutual TLS between
-this service and its callers. Of all the decisions recorded in this
+default to plaintext for the same reason and connect over TLS only when
+a deployment opts the server into it, matching the server's own opt-in
+TLS posture. This is a stated limitation, not an oversight — a genuine
+production deployment of this pattern would need to sit behind
+cluster-internal network policy or mutual TLS between this service and
+its callers. Of all the decisions recorded in this
 project, this is the one most likely to be challenged in review, which is
 exactly why it's recorded on its own rather than as an aside in a longer
 document.

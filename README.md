@@ -58,10 +58,10 @@ below), or a consumer's own custom resource, without Muninn dictating which.
 |----------------------------|----------------------------------------------------------------------|
 | `internal/kube`            | `ConfigSource` interface + `ConfigMapSource`, informers, patch-based cache sync |
 | `internal/app`             | domain layer: `Cache`, `DiscoveryService.Query/Resolve`, sentinel errors |
-| `internal/transport/grpc`  | proto ↔ domain translation, gRPC handler                            |
+| `internal/transport/grpc`  | proto ↔ domain translation, gRPC handler, gRPC server/listener/TLS  |
 | `internal/webhook`         | mutating admission webhook: Pod injection patch, HTTPS server        |
 | `internal/discoveryclient` | shared gRPC dial helper (used by `muninnctl` and `muninn resolve`)    |
-| `internal/observability`   | Prometheus metrics, tracing, health checks, gRPC server/listener      |
+| `internal/observability`   | Prometheus metrics, tracing, health checks                          |
 | `internal/config`          | env-driven configuration                                             |
 | `gen/discovery/v1`         | generated gRPC/protobuf stubs                                        |
 
