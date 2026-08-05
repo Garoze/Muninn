@@ -51,49 +51,6 @@ func TestConfigMapSource_Extract(t *testing.T) {
 	})
 }
 
-func TestSecretSource_KindWatchListLabelSelectorScope(t *testing.T) {
-	src := NewSecretSource(&config.Config{SecretLabelSelector: "muninn.io/config=secret"})
-
-	if src.Kind() != "Secret" {
-		t.Errorf("Kind: got %q, want Secret", src.Kind())
-	}
-	if _, ok := src.Watch().(*corev1.Secret); !ok {
-		t.Errorf("Watch: got %T, want *corev1.Secret", src.Watch())
-	}
-	if _, ok := src.List().(*corev1.SecretList); !ok {
-		t.Errorf("List: got %T, want *corev1.SecretList", src.List())
-	}
-	if src.LabelSelector() != "muninn.io/config=secret" {
-		t.Errorf("LabelSelector: got %q, want muninn.io/config=secret", src.LabelSelector())
-	}
-	if src.Scope() != "namespace" {
-		t.Errorf("Scope: got %q, want namespace", src.Scope())
-	}
-}
-
-func TestSecretSource_Extract(t *testing.T) {
-	src := NewSecretSource(&config.Config{})
-
-	t.Run("wrong type returns nil", func(t *testing.T) {
-		if got := src.Extract(&corev1.Namespace{}); got != nil {
-			t.Errorf("got %+v, want nil", got)
-		}
-	})
-
-	t.Run("nil Data returns nil", func(t *testing.T) {
-		if got := src.Extract(&corev1.Secret{}); got != nil {
-			t.Errorf("got %+v, want nil", got)
-		}
-	})
-
-	t.Run("decodes Data bytes into map[string]any strings", func(t *testing.T) {
-		got := src.Extract(&corev1.Secret{Data: map[string][]byte{"API_TOKEN": []byte("sekret")}})
-		if len(got) != 1 || got["API_TOKEN"] != "sekret" {
-			t.Errorf("got %+v", got)
-		}
-	})
-}
-
 func TestToAnyMap(t *testing.T) {
 	if got := toAnyMap(nil); got != nil {
 		t.Errorf("nil input: got %+v, want nil", got)

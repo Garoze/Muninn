@@ -77,38 +77,3 @@ func toAnyMap(m map[string]string) map[string]any {
 
 	return out
 }
-
-// SecretSource watches corev1.Secret, scoped by a label selector, and
-// extracts its Data (raw bytes, decoded to strings) as the config slice.
-type SecretSource struct {
-	labelSelector string
-}
-
-// NewSecretSource creates a SecretSource scoped to cfg.SecretLabelSelector.
-func NewSecretSource(cfg *config.Config) *SecretSource {
-	return &SecretSource{labelSelector: cfg.SecretLabelSelector}
-}
-
-func (s *SecretSource) Kind() string { return "Secret" }
-
-func (s *SecretSource) Watch() client.Object { return &corev1.Secret{} }
-
-func (s *SecretSource) List() client.ObjectList { return &corev1.SecretList{} }
-
-func (s *SecretSource) LabelSelector() string { return s.labelSelector }
-
-func (s *SecretSource) Scope() string { return "namespace" }
-
-func (s *SecretSource) Extract(obj client.Object) map[string]any {
-	sec, ok := obj.(*corev1.Secret)
-	if !ok || sec == nil || sec.Data == nil {
-		return nil
-	}
-
-	out := make(map[string]any, len(sec.Data))
-	for k, v := range sec.Data {
-		out[k] = string(v)
-	}
-
-	return out
-}

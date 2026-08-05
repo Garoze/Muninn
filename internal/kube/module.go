@@ -26,12 +26,6 @@ var Module = fx.Options(
 			fx.ResultTags(`group:"config_sources"`),
 		),
 	),
-	fx.Provide(
-		fx.Annotate(NewSecretSource,
-			fx.As(new(ConfigSource)),
-			fx.ResultTags(`group:"config_sources"`),
-		),
-	),
 	// Sits between the raw group and its consumers so Describe reports only
 	// enabled sources, not just registered ones.
 	fx.Provide(

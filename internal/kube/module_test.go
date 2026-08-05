@@ -65,34 +65,6 @@ func newFakeSourceForFx() ConfigSource {
 	return &fakeSource{kind: "Fake"}
 }
 
-func TestConfigSourcesGroup_ConfigMapAndSecretBothRegister(t *testing.T) {
-	var sources []ConfigSource
-
-	fxApp := fxtest.New(t,
-		fx.Provide(testConfig),
-		fx.Provide(
-			fx.Annotate(NewConfigMapSource, fx.As(new(ConfigSource)), fx.ResultTags(`group:"config_sources"`)),
-		),
-		fx.Provide(
-			fx.Annotate(NewSecretSource, fx.As(new(ConfigSource)), fx.ResultTags(`group:"config_sources"`)),
-		),
-		fx.Populate(fx.Annotate(&sources, fx.ParamTags(`group:"config_sources"`))),
-	)
-	defer fxApp.RequireStart().RequireStop()
-
-	if len(sources) != 2 {
-		t.Fatalf("got %d sources, want 2", len(sources))
-	}
-
-	kinds := map[string]bool{}
-	for _, s := range sources {
-		kinds[s.Kind()] = true
-	}
-	if !kinds["ConfigMap"] || !kinds["Secret"] {
-		t.Errorf("expected both ConfigMap and Secret kinds, got %+v", kinds)
-	}
-}
-
 // fxGraphWithFilter builds the fx.Provide chain shared by the tests below.
 func fxGraphWithFilter(cfg *config.Config, extra ...fx.Option) []fx.Option {
 	return append([]fx.Option{

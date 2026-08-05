@@ -53,7 +53,6 @@ func TestWatcherProjection(t *testing.T) {
 
 	sources := []kube.ConfigSource{
 		kube.NewConfigMapSource(&config.Config{ConfigMapLabelSelector: "muninn.io/config=runtime"}),
-		kube.NewSecretSource(&config.Config{SecretLabelSelector: "muninn.io/config=secret"}),
 	}
 	w, err := kube.NewWatcher(cfg, scheme, appCache, metrics, nil, nil, log, sources)
 	if err != nil {
@@ -109,20 +108,6 @@ func TestWatcherProjection(t *testing.T) {
 		t.Fatalf("create unlabeled configmap: %v", err)
 	}
 
-	// Proves ConfigMapSource and SecretSource project into the same merged
-	// cache entry against a real kube-apiserver.
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "runtime-secret",
-			Namespace: "arasaka",
-			Labels:    map[string]string{"muninn.io/config": "secret"},
-		},
-		Data: map[string][]byte{"API_TOKEN": []byte("sekret")},
-	}
-	if err := k8sClient.Create(context.Background(), secret); err != nil {
-		t.Fatalf("create secret: %v", err)
-	}
-
 	t.Run("project initial fixtures into cache", func(t *testing.T) {
 		eventually(t, 10*time.Second, func() bool {
 			e := appCache.Get("arasaka")
@@ -132,7 +117,7 @@ func TestWatcherProjection(t *testing.T) {
 
 			merged := e.Merged()
 			return merged["LOG_LEVEL"] == "info" && merged["DARK_MODE"] == "true" &&
-				merged["API_TOKEN"] == "sekret" && merged["SHOULD_NOT_APPEAR"] == nil
+				merged["SHOULD_NOT_APPEAR"] == nil
 		}, "watcher did not project fixtures into cache within timeout")
 	})
 
@@ -162,21 +147,6 @@ func TestWatcherProjection(t *testing.T) {
 			_, hasA := e.Sources["ConfigMap/runtime-config"]
 			return !hasA && e.Sources["ConfigMap/feature-flags"]["DARK_MODE"] == "true"
 		}, "ConfigMap delete should clear only its own source, leaving the rest of the entry intact")
-	})
-
-	t.Run("Secret delete clears only its own section (negative path)", func(t *testing.T) {
-		if err := k8sClient.Delete(context.Background(), secret); err != nil {
-			t.Fatalf("delete secret: %v", err)
-		}
-
-		eventually(t, 10*time.Second, func() bool {
-			e := appCache.Get("arasaka")
-			if e == nil {
-				return false
-			}
-			_, hasSecret := e.Sources["Secret/runtime-secret"]
-			return !hasSecret && e.Sources["ConfigMap/feature-flags"]["DARK_MODE"] == "true"
-		}, "Secret delete should clear only its own source, leaving ConfigMap data intact")
 	})
 
 	t.Run("removes entry once every source is gone", func(t *testing.T) {
