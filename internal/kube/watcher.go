@@ -345,10 +345,11 @@ func (w *Watcher) onSourceDelete(src ConfigSource) func(any) {
 }
 
 // sourceKey identifies obj's contributed slice within ConfigEntry.Sources.
-// Prefixed by the source's Kind so two different object kinds sharing an
-// object name in the same namespace don't collide as merge sources.
+// Prefixed by the source's KeyPrefix so co-registered sources sharing an
+// object name don't collide as merge sources - including two sources of
+// the same Kind, which KeyPrefix alone (not Kind) can distinguish.
 func sourceKey(src ConfigSource, obj client.Object) string {
-	return src.Kind() + "/" + obj.GetName()
+	return src.KeyPrefix() + "/" + obj.GetName()
 }
 
 // extractObject handles both direct objects and DeletedFinalStateUnknown

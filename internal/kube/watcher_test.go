@@ -30,11 +30,18 @@ func newTestWatcher(t *testing.T) *Watcher {
 // composes with more than just ConfigMapSource.
 type fakeSource struct {
 	kind          string
+	keyPrefix     string
 	labelSelector string
 	data          map[string]any
 }
 
-func (f *fakeSource) Kind() string                           { return f.kind }
+func (f *fakeSource) Kind() string { return f.kind }
+func (f *fakeSource) KeyPrefix() string {
+	if f.keyPrefix != "" {
+		return f.keyPrefix
+	}
+	return f.kind
+}
 func (f *fakeSource) Watch() client.Object                   { return &corev1.Secret{} }
 func (f *fakeSource) List() client.ObjectList                { return &corev1.SecretList{} }
 func (f *fakeSource) LabelSelector() string                  { return f.labelSelector }
@@ -280,6 +287,9 @@ func TestOnSourceDelete_ClearsOwnSourceOnly(t *testing.T) {
 
 // TestOnSourceUpsert_DifferentKindsDoNotCollide asserts a ConfigMap and an
 // unrelated source kind sharing an object name land under distinct keys.
+// See TestOnSourceUpsert_SameKindDistinctPrefixDoNotCollide and
+// TestOnSourceUpsert_SameKindSamePrefixStillCollides below for the same-Kind
+// case, which Kind() alone can't distinguish - only KeyPrefix() can.
 func TestOnSourceUpsert_DifferentKindsDoNotCollide(t *testing.T) {
 	w := newTestWatcher(t)
 	cmSource := NewConfigMapSource(&config.Config{})
@@ -303,6 +313,68 @@ func TestOnSourceUpsert_DifferentKindsDoNotCollide(t *testing.T) {
 	}
 	if len(entry.Sources) != 2 {
 		t.Errorf("expected 2 distinct source keys, got %d: %+v", len(entry.Sources), entry.Sources)
+	}
+}
+
+// TestOnSourceUpsert_SameKindDistinctPrefixDoNotCollide is the happy path:
+// two sources sharing a Kind (as two ConfigMapSources scoped by different
+// label selectors would) but registered with distinct KeyPrefix values
+// don't clobber each other, even watching an object of the same name in
+// the same namespace.
+func TestOnSourceUpsert_SameKindDistinctPrefixDoNotCollide(t *testing.T) {
+	w := newTestWatcher(t)
+	base := &fakeSource{kind: "ConfigMap", keyPrefix: "ConfigMap:base", data: map[string]any{"LOG_LEVEL": "info"}}
+	feature := &fakeSource{kind: "ConfigMap", keyPrefix: "ConfigMap:feature", data: map[string]any{"FEATURE_X": "true"}}
+
+	w.onSourceUpsert(base)(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "app-config", "1")})
+	w.onSourceUpsert(feature)(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "app-config", "1")})
+
+	entry := w.appCache.Get("ns1")
+	if entry == nil {
+		t.Fatal("expected namespace to be cached")
+	}
+	if entry.Sources["ConfigMap:base/app-config"]["LOG_LEVEL"] != "info" {
+		t.Errorf("base source missing or clobbered: got %+v", entry.Sources)
+	}
+	if entry.Sources["ConfigMap:feature/app-config"]["FEATURE_X"] != "true" {
+		t.Errorf("feature source missing or clobbered: got %+v", entry.Sources)
+	}
+	if len(entry.Sources) != 2 {
+		t.Errorf("expected 2 distinct source keys, got %d: %+v", len(entry.Sources), entry.Sources)
+	}
+
+	merged := entry.Merged()
+	if merged["LOG_LEVEL"] != "info" || merged["FEATURE_X"] != "true" {
+		t.Errorf("expected merged view to contain both sources' keys, got %+v", merged)
+	}
+}
+
+// TestOnSourceUpsert_SameKindSamePrefixStillCollides is the negative path:
+// two sources sharing both a Kind and a KeyPrefix (the default when neither
+// source sets one) do still overwrite each other when they watch an object
+// of the same name. This isn't a residual bug - KeyPrefix only prevents a
+// collision when a source author actually differentiates co-registered
+// siblings; it's on the registration, not automatic.
+func TestOnSourceUpsert_SameKindSamePrefixStillCollides(t *testing.T) {
+	w := newTestWatcher(t)
+	first := &fakeSource{kind: "ConfigMap", data: map[string]any{"LOG_LEVEL": "info"}}
+	second := &fakeSource{kind: "ConfigMap", data: map[string]any{"FEATURE_X": "true"}}
+
+	w.onSourceUpsert(first)(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "app-config", "1")})
+	w.onSourceUpsert(second)(&corev1.ConfigMap{ObjectMeta: objectMeta("ns1", "app-config", "1")})
+
+	entry := w.appCache.Get("ns1")
+	if entry == nil {
+		t.Fatal("expected namespace to be cached")
+	}
+	if len(entry.Sources) != 1 {
+		t.Fatalf("expected same Kind + same KeyPrefix to collide into 1 source key, got %d: %+v", len(entry.Sources), entry.Sources)
+	}
+	if entry.Sources["ConfigMap/app-config"]["FEATURE_X"] != "true" {
+		t.Errorf("expected second upsert to have overwritten the first, got %+v", entry.Sources)
+	}
+	if _, stillPresent := entry.Sources["ConfigMap/app-config"]["LOG_LEVEL"]; stillPresent {
+		t.Errorf("expected first source's data to be gone, got %+v", entry.Sources)
 	}
 }
 
