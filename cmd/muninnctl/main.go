@@ -81,6 +81,7 @@ func cmdQuery(args []string) error {
 	namespace := fs.StringP("namespace", "n", "", "namespace (required)")
 	keys := fs.StringP("keys", "k", "", "comma-separated keys (required)")
 	strict := fs.BoolP("strict", "s", false, "return InvalidArgument if any key is missing")
+	tlsCA := fs.StringP("tls-ca", "c", "", "path to a CA certificate for verifying the server's TLS certificate (unset = plaintext)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -90,7 +91,7 @@ func cmdQuery(args []string) error {
 		return fmt.Errorf("--namespace and --keys are required (see 'muninnctl query -h')")
 	}
 
-	client, conn, err := discoveryclient.Dial(*addr)
+	client, conn, err := discoveryclient.Dial(*addr, *tlsCA)
 	if err != nil {
 		return err
 	}
@@ -120,11 +121,12 @@ func cmdDescribe(args []string) error {
 	fs := pflag.NewFlagSet("describe", pflag.ExitOnError)
 	setFlagUsage(fs, "describe", "List the active configuration sources.")
 	addr := fs.StringP("addr", "a", defaultAddr, "muninn gRPC address (host:port)")
+	tlsCA := fs.StringP("tls-ca", "c", "", "path to a CA certificate for verifying the server's TLS certificate (unset = plaintext)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	client, conn, err := discoveryclient.Dial(*addr)
+	client, conn, err := discoveryclient.Dial(*addr, *tlsCA)
 	if err != nil {
 		return err
 	}

@@ -25,6 +25,7 @@ func cmdResolve(args []string) error {
 	out := fs.StringP("out", "o", "", "output file path (required)")
 	watch := fs.BoolP("watch", "w", false, "keep running and rewrite the file on drift instead of exiting after one write")
 	interval := fs.DurationP("interval", "i", 15*time.Second, "poll interval when --watch is set")
+	tlsCA := fs.StringP("tls-ca", "c", "", "path to a CA certificate for verifying the server's TLS certificate (unset = plaintext)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -34,7 +35,7 @@ func cmdResolve(args []string) error {
 		return fmt.Errorf("--namespace and --out are required (see 'muninn resolve -h')")
 	}
 
-	client, conn, err := discoveryclient.Dial(*addr)
+	client, conn, err := discoveryclient.Dial(*addr, *tlsCA)
 	if err != nil {
 		return err
 	}
