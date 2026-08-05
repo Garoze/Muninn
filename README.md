@@ -25,8 +25,8 @@ A mutating admission webhook offers a second, code-free integration path:
 a Pod that opts in via an annotation gets a shared volume, an init
 container, and a sidecar injected automatically, and reads its resolved
 configuration as a file instead of a gRPC client. Muninn makes no
-assumptions about what those keys mean, what a "tenant" is, or what
-platform sits underneath it — it resolves configuration, nothing more.
+assumptions about what those keys mean or what platform sits underneath
+it — it resolves configuration, nothing more.
 
 ```mermaid
 flowchart LR
@@ -47,9 +47,9 @@ labeled ConfigMaps, merges them into a per-namespace view, and serves that
 view over gRPC with a documented contract (`Describe`).
 
 A namespace is a natural, generic scope — it composes cleanly with a
-single-tenant deployment (one ConfigMap in `default`), a multi-tenant one
-(a ConfigMap per tenant namespace, as in the
-[multi-tenant usage example](#multi-tenant-usage-an-example-not-a-requirement)
+single-namespace deployment (one ConfigMap in `default`), several
+namespaces (a ConfigMap per namespace, as in the
+[additional-namespaces example](#scoping-to-additional-namespaces-an-example)
 below), or a consumer's own custom resource, without Muninn dictating which.
 
 ## Architecture
@@ -98,6 +98,11 @@ other design decisions.
 - `make`
 - A running Kubernetes cluster and `kubectl` pointed at it (developed
   against [k3s](https://k3s.io/); any cluster works)
+- [cert-manager](https://cert-manager.io/) already installed on the
+  cluster (only for `make deploy-webhook` — the gRPC resolver alone,
+  `make deploy`, doesn't need it). Muninn's own manifests issue a
+  `Certificate` through it but don't install it themselves; see
+  "Delivering config as a file" below.
 - [`grpcurl`](https://github.com/fullstorydev/grpcurl) (optional — for
   calling the API directly instead of through `muninnctl`; the server
   registers gRPC reflection, so no `.proto` files are needed client-side)
@@ -207,15 +212,11 @@ make query NAMESPACE=arasaka KEYS=LOG_LEVEL
 `make undeploy` tears it back down. See [`docs/design.md`](docs/design.md)
 for the RBAC and deployment rationale.
 
-### Multi-tenant usage (an example, not a requirement)
+### Scoping to additional namespaces (an example)
 
-Muninn's core scope is a single label selector across namespaces — it has
-no built-in notion of a tenant and imposes no namespace naming convention.
-A namespace-per-tenant pattern, common in multi-tenant Kubernetes platforms,
-composes with that directly: give each tenant its own namespace (named
-however the platform names them — nothing below depends on a particular
-scheme), place a `muninn.io/config: "runtime"`-labeled ConfigMap in each,
-and query by that namespace:
+Muninn's core scope is a single label selector across namespaces, and it
+imposes no namespace naming convention — any namespace with a matching
+labeled ConfigMap works the same way as the sample fixture:
 
 ```bash
 kubectl create namespace acme
@@ -234,9 +235,9 @@ EOF
 make query NAMESPACE=acme KEYS=FEATURE_DARKMODE
 ```
 
-A second tenant (`globex`, or anything else) is the same ConfigMap shape in
-a different namespace — Muninn's cache is keyed by namespace regardless of
-what a given deployment chooses to call it.
+A second namespace (`globex`, or anything else) is the same ConfigMap
+shape in a different namespace — Muninn's cache is keyed by namespace
+regardless of what a given deployment chooses to call it.
 
 ### Delivering config as a file (the admission webhook)
 
@@ -354,8 +355,8 @@ tradeoffs as standalone Architecture Decision Records.
 ## Status
 
 Muninn is a portfolio project, not deployed in production. Its design
-reflects patterns used in a production multi-tenant platform, generalized
-into a standalone config resolver with no platform assumptions baked in.
+reflects patterns used in a production platform, generalized into a
+standalone config resolver with no platform assumptions baked in.
 Feature-complete for its current scope:
 
 - A pluggable `ConfigSource` interface; `ConfigMap` watching (label-selector scoped) is the registered default, patch-based cache merge across sources, with `ENABLED_CONFIG_SOURCES` to restrict which registered sources actually run

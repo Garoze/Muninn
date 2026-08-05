@@ -4,16 +4,13 @@
 
 ## Context
 
-An earlier architecture defined three fixed custom resource types
-(identity, runtime configuration, policy), each requiring a CRD
-installation and each shaped like the output of a real production
-control plane's reconciler — identity provisioning, service-mesh JWT
-validation, authorization binding sync — with no reconciler behind them
-in this repository. That shape assumed a platform this repository
-doesn't have. This service does not know what a tenant is, what a
-policy is, or what identity or mesh infrastructure exists downstream of
-it; it resolves configuration from whatever Kubernetes objects a
-consumer points it at.
+This service makes no assumptions about what platform or infrastructure
+a consumer runs downstream, or how a consumer chooses to organize its own
+configuration data. Committing to a specific, fixed custom resource
+shape — requiring a CRD installation and a predetermined schema — would
+bake in exactly that kind of assumption, and would need to be rebuilt or
+extended every time a consumer's data doesn't fit the shape this service
+picked.
 
 ## Decision
 

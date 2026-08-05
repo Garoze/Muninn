@@ -4,16 +4,15 @@
 
 ## Context
 
-An earlier architecture modeled tenant identity as a first-class custom
-resource, with its own lifecycle and provisioned-resource references,
-and isolated tenant-owned data by giving each tenant its own namespace.
-That model mirrored a real production control plane's reconciler output
-without the reconciler behind it in this repository — there is no
-provisioning system here that creates tenant identity, and no service
-mesh here that validates caller identity at a namespace boundary. A
-namespace boundary with neither of those behind it is an organizational
-convention, not a security boundary, and modeling it as though it were
-one overstated what this service can actually guarantee on its own.
+Namespace is Muninn's only resolution scope. A first-class tenant
+concept — its own identity object, lifecycle, and validation, layered on
+top of that scope — is a reasonable thing a consumer might want. Building
+one here would imply a security guarantee (validated, isolated tenant
+identity) this service cannot actually back up on its own: there is no
+provisioning system behind it that creates tenant identity, and no
+service mesh behind it that validates caller identity at a namespace
+boundary. A namespace boundary without either of those is an
+organizational convention, not a security boundary.
 
 ## Decision
 
@@ -42,3 +41,9 @@ for tenant isolation without a service mesh or network policy enforcing
 it at the namespace boundary has a gap this service does not close for
 them, and this ADR states that gap explicitly rather than leaving it
 implicit.
+
+A multi-tenant deployment (one namespace per tenant, a labeled ConfigMap
+in each) composes with this cleanly, since it needs nothing from Muninn
+beyond what any other multi-namespace usage already gets — the cache's
+namespace-keyed isolation is unit-tested against multiple distinct
+namespaces, and the README demonstrates the same pattern end to end.

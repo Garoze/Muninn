@@ -28,11 +28,11 @@ scales past "one workload reads its own ConfigMap directly."
 Muninn is a runtime configuration resolver: it watches a pluggable set of
 Kubernetes objects, keeps an in-memory, always-current projection of
 their data, and exposes that projection over a gRPC API and (optionally)
-as a file delivered directly into a consumer's Pod. It does not know what
-a tenant is, what a policy is, or what identity/mesh infrastructure a
-consumer's platform has downstream — it resolves whatever the objects it
-watches contain, for whichever scope (namespace, by default) a caller
-asks about.
+as a file delivered directly into a consumer's Pod. It makes no
+assumptions about what platform, identity model, or infrastructure a
+consumer runs downstream — it resolves whatever the objects it watches
+contain, for whichever scope (namespace, by default) a caller asks
+about.
 
 ## Goals and non-goals
 
