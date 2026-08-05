@@ -256,9 +256,15 @@ complete picture of a scope's state — reasoning about "what does this
 scope look like right now" always means reading the merged result, not
 any one event. That's the right tradeoff for keeping every source object
 fully decoupled from every other source object's data shape. Each
-source's contribution is keyed by that source's kind and object name, so
-two different source kinds sharing an object name in the same scope
-don't collide.
+source's contribution is keyed by a cache-facing identity distinct from
+its externally-reported type, so two sources sharing an object name in
+the same scope don't collide — including two independently registered
+sources of the same type, which a type-only key can't distinguish from
+each other. That identity defaults to the type itself when only one
+source of that type is registered, which is every source registered
+today; registering a second source of the same type without giving each
+a distinct identity is rejected outright at startup rather than allowed
+to silently collide at runtime.
 
 A scope's cache entry disappears entirely once every source object
 backing it is gone — there's no special-cased "identity" source whose
@@ -755,11 +761,3 @@ binary as the gRPC resolver, deployed as a separate process, rather than
 as an entirely separate binary maintained and released independently.
 See [ADR-0010](adr/0010-single-process-webhook.md) for the full
 reasoning.
-
-**Decision:** An operator-facing mechanism to enable or disable
-individual registered `ConfigSource` kinds at deploy time (an environment
-variable naming which source kinds are active) is not built. Today, which
-sources run is decided by which sources are registered in code, not by a
-runtime toggle. This has thin practical value while only one real source
-kind (the `ConfigMap` source) exists to toggle against, and is expected to
-be revisited once a second real source kind is registered.

@@ -33,9 +33,13 @@ No single event ever carries a complete picture of a scope — reasoning
 about "what does this scope look like right now" always means reading
 the merged result, not any one event. In exchange, every source stays
 fully decoupled from every other source's data shape. Each source's
-contribution is keyed by that source's kind and object name, so two
-different source kinds sharing an object name in the same scope don't
-collide. This decision is the foundation the rest of the caching model is
-built on, including how source-object deletion is handled — a scope's
+contribution is keyed by a cache-facing identity distinct from its
+externally-reported type, so sources sharing an object name in the same
+scope don't collide — including two independently registered sources of
+the same type, which a type-only key can't distinguish from each other
+(see [ADR-0008](0008-pluggable-config-source.md) for that distinction and
+why a same-type collision fails fast at startup rather than merging
+silently). This decision is the foundation the rest of the caching model
+is built on, including how source-object deletion is handled — a scope's
 entry disappears once every source object backing it is gone, with no
 source treated as a special-cased identity anchor.
