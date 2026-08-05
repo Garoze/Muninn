@@ -86,6 +86,10 @@ func NewWatcher(
 		return nil, fmt.Errorf("no config sources registered")
 	}
 
+	if err := validateDistinctKeyPrefixes(sources); err != nil {
+		return nil, err
+	}
+
 	byObject := make(map[client.Object]ctrlcache.ByObject, len(sources))
 	for _, src := range sources {
 		selector, err := labels.Parse(src.LabelSelector())
@@ -350,6 +354,25 @@ func (w *Watcher) onSourceDelete(src ConfigSource) func(any) {
 // the same Kind, which KeyPrefix alone (not Kind) can distinguish.
 func sourceKey(src ConfigSource, obj client.Object) string {
 	return src.KeyPrefix() + "/" + obj.GetName()
+}
+
+// validateDistinctKeyPrefixes fails fast at startup if two registered
+// sources would silently overwrite each other's cache entries, turning the
+// runtime data-loss scenario KeyPrefix guards against into a construction
+// error instead.
+func validateDistinctKeyPrefixes(sources []ConfigSource) error {
+	seen := make(map[string]string, len(sources))
+	for _, src := range sources {
+		prefix := src.KeyPrefix()
+		if other, collides := seen[prefix]; collides {
+			return fmt.Errorf(
+				"config sources %q and %q both use KeyPrefix %q: would silently overwrite each other's cache entries",
+				other, src.Kind(), prefix,
+			)
+		}
+		seen[prefix] = src.Kind()
+	}
+	return nil
 }
 
 // extractObject handles both direct objects and DeletedFinalStateUnknown

@@ -408,3 +408,50 @@ func TestNewWatcher_InvalidLabelSelectorErrors(t *testing.T) {
 		t.Fatal("expected an error for an invalid label selector, got nil")
 	}
 }
+
+// TestValidateDistinctKeyPrefixes_DuplicateErrors is the fail-fast
+// counterpart to the runtime negative-path test in
+// TestOnSourceUpsert_SameKindSamePrefixStillCollides - two sources that
+// would silently overwrite each other's cache entries fail this check
+// instead of colliding at runtime. Wired into NewWatcher so it happens at
+// startup, before any informer is registered.
+func TestValidateDistinctKeyPrefixes_DuplicateErrors(t *testing.T) {
+	sources := []ConfigSource{
+		&fakeSource{kind: "ConfigMap"},
+		&fakeSource{kind: "ConfigMap"},
+	}
+	if err := validateDistinctKeyPrefixes(sources); err == nil {
+		t.Fatal("expected an error for two sources sharing a KeyPrefix, got nil")
+	}
+}
+
+// TestValidateDistinctKeyPrefixes_DistinctSucceeds is the happy-path
+// counterpart: two sources sharing a Kind but registered with distinct
+// KeyPrefix values don't trip the check.
+func TestValidateDistinctKeyPrefixes_DistinctSucceeds(t *testing.T) {
+	sources := []ConfigSource{
+		&fakeSource{kind: "ConfigMap", keyPrefix: "ConfigMap:base"},
+		&fakeSource{kind: "ConfigMap", keyPrefix: "ConfigMap:feature"},
+	}
+	if err := validateDistinctKeyPrefixes(sources); err != nil {
+		t.Fatalf("expected distinct KeyPrefix values not to error, got: %v", err)
+	}
+}
+
+// TestNewWatcher_DuplicateKeyPrefixErrors confirms the check above is
+// actually wired into NewWatcher, not just defined and unused.
+func TestNewWatcher_DuplicateKeyPrefixErrors(t *testing.T) {
+	scheme, err := NewScheme()
+	if err != nil {
+		t.Fatalf("new scheme: %v", err)
+	}
+
+	sources := []ConfigSource{
+		&fakeSource{kind: "ConfigMap"},
+		&fakeSource{kind: "ConfigMap"},
+	}
+	_, err = NewWatcher(&rest.Config{}, scheme, app.NewCache(), observability.NewMetrics(prometheus.NewRegistry()), nil, nil, zap.NewNop(), sources)
+	if err == nil {
+		t.Fatal("expected an error for two sources sharing a KeyPrefix, got nil")
+	}
+}

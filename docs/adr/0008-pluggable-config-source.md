@@ -61,7 +61,13 @@ sources of the same type stay distinguishable as long as each
 registration sets its own cache-facing identity, which is on whoever
 registers multiple sources of one type to do; the default (falling back
 to the type identity) is correct precisely when only one source of that
-type is ever registered, which is every source registered today. The
+type is ever registered, which is every source registered today. Since
+a registration mistake here would otherwise be a silent, ongoing data
+loss discovered only by noticing missing configuration, the watch
+layer validates every registered source's cache-facing identity is
+distinct at startup and fails construction outright on a collision,
+rather than allowing an ambiguous registration to run and silently
+overwrite one source's contribution with another's. The
 API's `Describe` operation reports the active source's shape (kind,
 label selector, scope) rather than an enumerated key list, since there
 is no fixed vocabulary to enumerate once the underlying source is
