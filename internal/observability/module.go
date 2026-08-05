@@ -17,7 +17,6 @@ var Module = fx.Options(
 	fx.Provide(NewLogger),
 	fx.Provide(func() prometheus.Registerer { return prometheus.DefaultRegisterer }),
 	fx.Provide(NewMetrics),
-	fx.Provide(NewGRPCListener),
 	fx.Provide(NewStandaloneHealth),
 	fx.Provide(NewTracerProvider),
 	fx.Invoke(StartMetricsServer),

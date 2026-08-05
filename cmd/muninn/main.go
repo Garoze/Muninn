@@ -10,12 +10,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	health "google.golang.org/grpc/health"
 
 	appModule "github.com/garoze/muninn/internal/app"
 	"github.com/garoze/muninn/internal/config"
@@ -34,32 +30,6 @@ func startServe() (*fx.App, error) {
 		appModule.Module,
 		kubeModule.Module,
 		grpcTransport.Module,
-
-		// gRPC server - constructed here (composition root) to avoid an
-		// import cycle between observability (listener/health) and
-		// transport/grpc (handler registration). Depends on *sdktrace.TracerProvider
-		// explicitly (not otel.GetTracerProvider()'s global) so Fx sequences
-		// NewTracerProvider before this runs - otelgrpc.NewServerHandler resolves
-		// its TracerProvider once at construction, not lazily per request.
-		// TLS is opt-in via cfg.GRPCTLSCertPath/GRPCTLSKeyPath (see
-		// observability.TLSServerOption) - plaintext by default, since many
-		// deployments terminate mTLS at a service mesh sidecar instead.
-		fx.Provide(func(cfg *config.Config, log *zap.Logger, tp *sdktrace.TracerProvider) (*grpc.Server, *health.Server, error) {
-			opts := []grpc.ServerOption{
-				grpc.StatsHandler(otelgrpc.NewServerHandler(otelgrpc.WithTracerProvider(tp))),
-			}
-
-			tlsOpt, err := observability.TLSServerOption(cfg)
-			if err != nil {
-				return nil, nil, err
-			}
-			if tlsOpt != nil {
-				opts = append(opts, tlsOpt)
-			}
-
-			r := observability.NewGRPCServer(log, opts...)
-			return r.Server, r.HealthServer, nil
-		}),
 
 		fx.Invoke(func(lc fx.Lifecycle, log *zap.Logger) {
 			lc.Append(fx.Hook{
@@ -85,8 +55,7 @@ func startServe() (*fx.App, error) {
 // startWebhook wires the mutating admission webhook HTTP server. This is
 // "muninn webhook". Like NewLogger, the constructors below are called
 // directly rather than pulling in the whole observability.Module - that
-// bundle also brings NewGRPCListener/NewStandaloneHealth, which webhook
-// mode doesn't need.
+// bundle also brings NewStandaloneHealth, which webhook mode doesn't need.
 func startWebhook() (*fx.App, error) {
 	app := fx.New(
 		fx.Provide(config.New),

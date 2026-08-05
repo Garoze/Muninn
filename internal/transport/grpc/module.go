@@ -15,6 +15,8 @@ import (
 
 var Module = fx.Options(
 	fx.Provide(newDiscoveryHandler),
+	fx.Provide(NewGRPCListener),
+	fx.Provide(newGRPCServer),
 	fx.Invoke(startGRPCServer),
 )
 

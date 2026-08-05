@@ -1,9 +1,11 @@
-package observability
+package grpc
 
 import (
 	"fmt"
 	"net"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -11,6 +13,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	"github.com/garoze/muninn/internal/config"
+	"github.com/garoze/muninn/internal/observability"
 )
 
 // GRPCServerResult groups the gRPC server and its health server so Fx
@@ -38,7 +41,7 @@ func NewGRPCListener(cfg *config.Config, log *zap.Logger) (net.Listener, error) 
 // flip it via the returned HealthServer after cache sync.
 func NewGRPCServer(log *zap.Logger, opts ...grpc.ServerOption) GRPCServerResult {
 	s := grpc.NewServer(opts...)
-	hs := RegisterGRPCHealth(s)
+	hs := observability.RegisterGRPCHealth(s)
 	reflection.Register(s)
 
 	return GRPCServerResult{Server: s, HealthServer: hs}
@@ -68,4 +71,27 @@ func TLSServerOption(cfg *config.Config) (grpc.ServerOption, error) {
 	}
 
 	return grpc.Creds(creds), nil
+}
+
+// newGRPCServer builds the main *grpc.Server and its *health.Server,
+// wiring in OTel gRPC stats instrumentation and TLS (opt-in, see
+// TLSServerOption). Depends on *sdktrace.TracerProvider explicitly (not
+// otel.GetTracerProvider()'s global) so Fx sequences NewTracerProvider
+// before this runs - otelgrpc.NewServerHandler resolves its TracerProvider
+// once at construction, not lazily per request.
+func newGRPCServer(cfg *config.Config, log *zap.Logger, tp *sdktrace.TracerProvider) (*grpc.Server, *health.Server, error) {
+	opts := []grpc.ServerOption{
+		grpc.StatsHandler(otelgrpc.NewServerHandler(otelgrpc.WithTracerProvider(tp))),
+	}
+
+	tlsOpt, err := TLSServerOption(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	if tlsOpt != nil {
+		opts = append(opts, tlsOpt)
+	}
+
+	r := NewGRPCServer(log, opts...)
+	return r.Server, r.HealthServer, nil
 }

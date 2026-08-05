@@ -1,6 +1,7 @@
-package observability
+package grpc
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -13,9 +14,21 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	health "google.golang.org/grpc/health"
 
 	"github.com/garoze/muninn/internal/config"
 )
+
+func checkStatus(t *testing.T, hs *health.Server) healthpb.HealthCheckResponse_ServingStatus {
+	t.Helper()
+	resp, err := hs.Check(context.Background(), &healthpb.HealthCheckRequest{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	return resp.Status
+}
 
 func TestNewGRPCListener_BindsConfiguredAddr(t *testing.T) {
 	cfg := &config.Config{GrpcServiceAddr: "127.0.0.1:0"}
@@ -133,7 +146,7 @@ func TestTLSServerOption_ValidCert_ReturnsCredsOption(t *testing.T) {
 // real files on disk, so anything exercising it needs something written
 // out, not just in-memory bytes. Mirrors internal/webhook/module_test.go's
 // helper of the same name/shape - not shared across packages since both
-// are test-only and internal/webhook must not import internal/observability
+// are test-only and internal/webhook must not import internal/transport/grpc
 // just for this.
 func generateSelfSignedCert(t *testing.T, dir string) (certPath, keyPath string) {
 	t.Helper()
