@@ -68,7 +68,7 @@ The domain layer knows nothing about Kubernetes or gRPC; each edge translates
 in its own direction, and that boundary is enforced structurally rather than by
 convention.
 
-Five ideas carry most of the design:
+Design principles:
 
 - **Pluggable sources.** The watch layer, cache and domain layer are written
   against a `ConfigSource` interface, not against `ConfigMap`. A
@@ -163,9 +163,9 @@ Live cluster changes are reflected without restarting the process: try
 
 ## Deployment
 
-`make run` runs Muninn on the host, against whatever `$KUBECONFIG` is
-configured: suited to development, not production. `make deploy` runs it
-as a Pod instead, under its own least-privilege `ServiceAccount`:
+`make run` runs Muninn on the host against whatever `$KUBECONFIG` points at,
+which suits development rather than production. `make deploy` runs it as a Pod
+instead, under its own least-privilege `ServiceAccount`:
 
 ```bash
 make image      # build the image
@@ -173,21 +173,23 @@ make load       # import it into k3s's containerd store
 make deploy     # apply config/manager/ + config/rbac/
 ```
 
+> [!NOTE]
+> `make load` imports into k3s specifically. On another cluster, get
+> `localhost/muninn:latest` onto the nodes however that cluster expects
+> (`minikube image load`, `kind load image-archive` after a `podman save`, or
+> a push to a registry the cluster can reach), then run `make deploy`.
+
 ```bash
 kubectl get pods -n muninn-system   # should reach 1/1 Running
 kubectl port-forward -n muninn-system deploy/muninn 5010:5010 &
 make query NAMESPACE=arasaka KEYS=LOG_LEVEL
 ```
 
-`make undeploy` tears it back down. See [`docs/design.md`](docs/design.md)
-for the RBAC and deployment rationale.
+`make undeploy` tears it back down.
 
 ### Delivering config as a file (the admission webhook)
 
-`make deploy` alone covers the gRPC API. The mutating admission webhook is
-a separate deployment, requiring [cert-manager](https://cert-manager.io/)
-already installed on the cluster (an external prerequisite Muninn's own
-manifests don't install):
+`make deploy` covers the gRPC API only. The webhook is a separate deployment:
 
 ```bash
 make deploy-webhook     # apply config/webhook/: Issuer, Certificate,
@@ -207,8 +209,7 @@ resolves the Pod's namespace once, and a sidecar that keeps the file
 current on an interval, and mounts that volume into the Pod's own
 container too, so the application reads `/etc/muninn/config.yaml`
 directly with no gRPC client of its own. `make undeploy-webhook` tears it
-back down. See [`docs/design.md`](docs/design.md) for the injection and
-drift-detection rationale.
+back down.
 
 ### Delivering secrets
 
