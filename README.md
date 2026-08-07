@@ -342,8 +342,18 @@ are run on demand, as described under [Testing](#testing).
 
 ## Contributing
 
-Issues and pull requests are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md)
-documents the workflow, the commit convention, and what CI checks.
+Issues and pull requests are welcome.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) documents the development workflow,
+commit conventions, and CI checks.
+
+The planned scope of Muninn as a portfolio project is complete, so new
+features are generally outside the project's scope. Pull requests may not be
+reviewed or merged if they fall outside that scope; for larger changes,
+forking the project may be a better approach.
+
+Bug reports are an exception. If you are running Muninn in a real cluster,
+please report any bugs you encounter. They will be investigated on a
+best-effort basis.
 
 ## License
 
