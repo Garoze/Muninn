@@ -292,6 +292,66 @@ func TestResolveWatch_ConvergesToLatestValueAcrossTicks(t *testing.T) {
 	}
 }
 
+func TestResolveWatch_NewRefKey_TriggersDriftReport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	client := &fakeDiscoveryClient{
+		responses: []*discoveryv1.ResolveResponse{
+			{Values: []*discoveryv1.KeyValue{mustKeyValue(t, "db_password_ref", "vault://secret/data/arasaka/db-password")}, Revision: "1"},
+			{Values: []*discoveryv1.KeyValue{
+				mustKeyValue(t, "db_password_ref", "vault://secret/data/arasaka/db-password"),
+				mustKeyValue(t, "api_key_ref", "vault://secret/data/arasaka/api-key"),
+			}, Revision: "2"},
+		},
+		errs: []error{nil, nil},
+	}
+
+	stderr := captureStderr(t)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- resolveWatch(client, "arasaka", path, 20*time.Millisecond)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	stopResolveWatch(t, done)
+
+	out := stderr()
+	if !strings.Contains(out, "drift: new secret reference(s) api_key_ref appeared for namespace arasaka") {
+		t.Errorf("expected a drift report for the newly-appeared api_key_ref, got: %s", out)
+	}
+	// The pre-existing db_password_ref must not be reported again - only
+	// the addition, not the whole ref set, is "newly appeared".
+	if strings.Contains(out, "db_password_ref appeared") {
+		t.Error("expected db_password_ref (present since the first poll) not to be reported as newly appeared")
+	}
+}
+
+func TestResolveWatch_FirstPoll_NeverReportsDrift(t *testing.T) {
+	// The baseline poll has nothing to have drifted from - even though it's
+	// the Pod's first-ever observation of a *_ref key, that's not "new."
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	client := &fakeDiscoveryClient{
+		responses: []*discoveryv1.ResolveResponse{
+			{Values: []*discoveryv1.KeyValue{mustKeyValue(t, "db_password_ref", "vault://secret/data/arasaka/db-password")}, Revision: "1"},
+		},
+		errs: []error{nil},
+	}
+
+	stderr := captureStderr(t)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- resolveWatch(client, "arasaka", path, 20*time.Millisecond)
+	}()
+
+	time.Sleep(80 * time.Millisecond)
+	stopResolveWatch(t, done)
+
+	if out := stderr(); strings.Contains(out, "drift:") {
+		t.Errorf("expected no drift report on the very first poll, got: %s", out)
+	}
+}
+
 // stopResolveWatch sends SIGTERM (the signal resolveWatch listens for) and
 // waits for its goroutine to return.
 func stopResolveWatch(t *testing.T, done <-chan error) {

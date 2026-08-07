@@ -83,6 +83,9 @@ func resolveWatch(client discoveryv1.DiscoveryServiceClient, namespace, out stri
 	defer stop()
 
 	var lastWritten []byte
+	var lastRefKeys []string
+	firstTick := true
+	reporter := &driftReporter{}
 
 	tick := func() error {
 		reqCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -93,12 +96,15 @@ func resolveWatch(client discoveryv1.DiscoveryServiceClient, namespace, out stri
 			return pollFailure(out, "resolve poll failed", err)
 		}
 
-		data, err := marshalConfigFile(resp)
+		resolved := resolvedMap(resp)
+		data, err := yaml.Marshal(resolved)
 		if err != nil {
 			return pollFailure(out, "marshaling resolved config failed", err)
 		}
+		currentRefKeys := refKeys(resolved)
 
 		if bytes.Equal(data, lastWritten) {
+			firstTick = false
 			return nil
 		}
 
@@ -106,13 +112,24 @@ func resolveWatch(client discoveryv1.DiscoveryServiceClient, namespace, out stri
 			return pollFailure(out, "writing config file failed", err)
 		}
 
+		// Only after the baseline poll: the very first tick has nothing to
+		// have drifted from, so nothing here is "newly appeared" yet.
+		if !firstTick {
+			if added := newlyAppearedRefs(lastRefKeys, currentRefKeys); len(added) > 0 {
+				reporter.Report(ctx, namespace, added)
+			}
+		}
+
 		lastWritten = data
+		lastRefKeys = currentRefKeys
+		firstTick = false
 		return nil
 	}
 
 	// Write once immediately so the file exists before the first interval
-	// elapses. A failure here is fatal by definition - out can't already
-	// exist on a fresh start (pollFailure would still confirm that).
+	// elapses. pollFailure decides whether a failure here is fatal: on a cold
+	// start there is no file to fall back on, but after a sidecar restart the
+	// init container has already written one to the shared volume.
 	if err := tick(); err != nil {
 		return err
 	}
@@ -143,12 +160,19 @@ func pollFailure(out, msg string, err error) error {
 }
 
 func marshalConfigFile(resp *discoveryv1.ResolveResponse) ([]byte, error) {
+	return yaml.Marshal(resolvedMap(resp))
+}
+
+// resolvedMap flattens a ResolveResponse into the same map shape
+// marshalConfigFile writes out - shared with drift.go's *_ref detection so
+// both read the identical data, not two independent conversions of the
+// same response that could quietly disagree.
+func resolvedMap(resp *discoveryv1.ResolveResponse) map[string]any {
 	out := make(map[string]any, len(resp.GetValues()))
 	for _, kv := range resp.GetValues() {
 		out[kv.GetKey()] = kv.GetValue().AsInterface()
 	}
-
-	return yaml.Marshal(out)
+	return out
 }
 
 // writeFileAtomic writes data to a temp file in the same directory as path,
