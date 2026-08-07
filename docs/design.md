@@ -3,7 +3,7 @@
 This document records why Muninn is built the way it is: the problem it
 solves, the decisions made along the way, the alternatives weighed for
 each, and the tradeoffs accepted. It is written to stay accurate across
-implementation refactors — it describes responsibilities and contracts,
+implementation refactors: it describes responsibilities and contracts,
 not files, functions, or package layout. The README covers what the
 system does and how to run it; [`docs/adr/`](adr/) holds standalone
 records for the decisions below with the most significant tradeoffs.
@@ -18,9 +18,9 @@ operated in production.
 ## Problem being solved
 
 Workloads running in Kubernetes routinely need small amounts of runtime
-configuration — feature flags, log levels, per-environment settings —
-that changes independently of the container image and needs to reach a
-running Pod without a restart. The data usually already exists as a
+configuration such as feature flags, log levels and per-environment
+settings, which changes independently of the container image and needs
+to reach a running Pod without a restart. The data usually already exists as a
 Kubernetes object (a ConfigMap, or a custom resource an operator
 maintains); the missing piece is a way to serve it to consumers that
 scales past "one workload reads its own ConfigMap directly."
@@ -30,7 +30,7 @@ Kubernetes objects, keeps an in-memory, always-current projection of
 their data, and exposes that projection over a gRPC API and (optionally)
 as a file delivered directly into a consumer's Pod. It makes no
 assumptions about what platform, identity model, or infrastructure a
-consumer runs downstream — it resolves whatever the objects it watches
+consumer runs downstream: it resolves whatever the objects it watches
 contain, for whichever scope (namespace, by default) a caller asks
 about.
 
@@ -60,14 +60,16 @@ about.
   distinct engineering problem from the source-watching and caching this
   service demonstrates. Bundling both into one repository would blur
   two separable concerns instead of sharpening either. If it's ever
-  built, it belongs in its own standalone, generic repository — not
+  built, it belongs in its own standalone, generic repository: not
   bolted onto the service it would consume.
-- A reconciler or control loop. Muninn never writes Kubernetes objects
-  other than the Pod-spec patches its admission webhook returns during
-  admission. It carries no reconciliation or steady-state write
-  responsibility over cluster state.
+- A reconciler or control loop. The only cluster state Muninn writes is
+  request-scoped: the Pod-spec patch its admission webhook returns, and
+  the per-namespace secret-routing object that webhook derives from the
+  configuration it resolved (see Secret delivery below). Neither is a
+  steady-state write responsibility, and nothing is reconciled toward a
+  desired state on an ongoing basis.
 - A provisioning system. Muninn doesn't create the ConfigMaps or custom
-  resources it watches — that's whatever operator or control plane
+  resources it watches: that's whatever operator or control plane
   manages the consuming workload's own deployment.
 - An enforced multi-tenancy model. Namespace-scoped isolation is a usage
   pattern this service composes with, not something it models, validates,
@@ -88,9 +90,19 @@ flowchart LR
     D --> T[Transport layer]
     T --> Q[gRPC Query/Resolve/Describe API]
     Q --> X[Direct gRPC callers]
-    D --> H[Mutating admission webhook]
-    H --> P[Init container + sidecar in consumer Pods]
+    Q --> P[Init container + sidecar in consumer Pods]
+
+    K --> W2[ConfigSource watchers]
+    W2 --> C2[(In-memory cache)]
+    C2 --> D2[Domain layer]
+    D2 --> H[Mutating admission webhook]
+    H --> P
 ```
+
+The two processes each assemble the same watch, cache and domain
+components from the same source; neither reads the other's. The injected
+containers do call the gRPC API, but only after admission has already
+completed.
 
 Five responsibilities, each isolated from the others:
 
@@ -104,13 +116,16 @@ Five responsibilities, each isolated from the others:
 - A **delivery layer** (the mutating admission webhook) that, for
   opted-in Pods, injects a shared volume plus an init container and
   sidecar that call the gRPC API on the Pod's behalf and write the result
-  to a file — an alternative to embedding a gRPC client at all.
+  to a file, an alternative to embedding a gRPC client at all. The
+  webhook runs its own watch layer and its own instance of the domain
+  layer, so deciding an admission depends on nothing outside its own
+  process and the Kubernetes API (see Availability boundaries below).
 - A cross-cutting **observability layer** (metrics, structured logs,
   traces) that instruments the gRPC API and the webhook without
   participating in either's logic.
 
 A composition root assembles these at startup and owns their lifecycle
-order — nothing else in the system needs to know how the others are
+order: nothing else in the system needs to know how the others are
 constructed. The gRPC resolver and the webhook run as separate processes
 (see [ADR-0010](adr/0010-single-process-webhook.md)); each assembles only
 the components its own mode needs.
@@ -129,23 +144,22 @@ hand every time.
 
 **Alternatives considered:**
 - Hand-written wiring in the composition root, constructing each
-  component in the right order directly — rejected: correct today, but
+  component in the right order directly. Rejected: correct today, but
   the ordering constraint is implicit in the code rather than derived
   from declared dependencies, so a future change can silently violate it
   (construct something before what it depends on)
   without any error until runtime.
 
 **Tradeoffs:** A dependency-injection framework adds a layer of
-indirection between "what constructs what" and the code that reads it —
+indirection between "what constructs what" and the code that reads it:
 construction order is derived at startup rather than visible as a
 straight-line sequence in the composition root. That's an accepted cost
 for a system with enough independent components that manual ordering
 would otherwise be a recurring source of startup-order bugs. It also
-means a wiring mistake (a dependency the graph can't satisfy) fails at
-process start, not at compile time — a real defect class this project has
-hit and fixed, distinct from anything a unit test exercises, since unit
-tests construct components directly rather than through the framework's
-graph.
+means a wiring mistake (a dependency the graph cannot satisfy) fails at
+process start rather than at compile time, and is invisible to unit
+tests, which construct components directly rather than through the
+graph. Tests that assemble the real modules exist for that reason.
 
 ## Component responsibilities
 
@@ -153,16 +167,16 @@ graph.
 |---|---|---|
 | Watch layer | Translating source-object events into cache updates, across a pluggable set of source kinds | Answering queries, holding request state |
 | Domain layer | Cached scope state, resolution logic, readiness state | Anything protocol-specific (Kubernetes or gRPC) |
-| Transport layer | Request/response translation, error-to-status-code mapping, standing up the gRPC server (listener, optional TLS) those requests arrive on | Business logic — it delegates every query to the domain layer |
-| Delivery layer (webhook) | Deciding whether a Pod opted in, building the injection patch | Resolving configuration itself — it delegates that to the same gRPC API direct callers use |
+| Transport layer | Request/response translation, error-to-status-code mapping, standing up the gRPC server (listener, optional TLS) those requests arrive on | Business logic, it delegates every query to the domain layer |
+| Delivery layer (webhook) | Deciding whether a Pod opted in, resolving the Pod's scope from its own cache, building the injection patch, deriving the secret-routing object | Reading or handling a secret value; depending on the gRPC resolver process being reachable |
 | Observability layer | Metrics, structured logging, distributed tracing | Influencing request outcomes |
 
 A pluggable source abstraction defines what the watch layer needs from
 any source kind: what to watch, how to scope it (a label selector, a
 namespace or cluster scope), and how to extract the fields it
-contributes to a cache entry. One implementation is registered today — a
+contributes to a cache entry. One implementation is registered today: a
 source watching core `ConfigMap` objects, scoped by a configurable label
-selector — but nothing in the watch layer, the cache, or the domain layer
+selector, but nothing in the watch layer, the cache, or the domain layer
 is written against `ConfigMap` specifically. A second source kind (a
 bring-your-own custom resource, for example) registers by satisfying the
 same abstraction; nothing downstream changes.
@@ -179,11 +193,11 @@ state without per-request API server load, and it has no reconciliation
 responsibility that would require a write path.
 
 **Alternatives considered:**
-- Periodic polling of the API server — rejected: introduces a staleness
+- Periodic polling of the API server. Rejected: introduces a staleness
   window proportional to the poll interval, and scales polling load with
   both scope count and poll frequency.
 - A full reconciler pattern (compare desired vs. actual state, write
-  corrections) — rejected: there is no "desired state" for Muninn to
+  corrections). Rejected: there is no "desired state" for Muninn to
   reconcile toward; it only needs to observe, never mutate cluster state.
 
 **Tradeoffs:** Informers hold a full local copy of watched objects in
@@ -192,7 +206,7 @@ load. This is the right tradeoff for a service that answers a very high
 ratio of reads to underlying object changes.
 
 RBAC follows from this model: the label-selector-scoped source watches
-`ConfigMap` objects across every namespace matching that selector — an
+`ConfigMap` objects across every namespace matching that selector: an
 open-ended set that changes at runtime as namespaces and ConfigMaps come
 and go. A binding scoped to fixed, known namespaces can't express that.
 
@@ -201,19 +215,26 @@ cluster-wide, rather than a namespace-scoped role bound per namespace.
 
 **Alternatives considered:**
 - A namespaced role per namespace, created and torn down as namespaces
-  appear and disappear — rejected: couples this service's access
+  appear and disappear. Rejected: couples this service's access
   provisioning to whatever creates those namespaces, and still can't
   grant access to a namespace before it exists.
 
 **Tradeoffs:** A cluster-scoped grant is broader than any single
 namespace needs, but it's the only binding shape that correctly
 expresses "watch this resource type across an open-ended, changing set of
-namespaces." The grant itself stays narrow in another dimension —
-read-only, and scoped to exactly the resource type (core `ConfigMap`)
-this service's registered source watches; a bring-your-own source kind
-brings its own RBAC requirement, which is that source's registration
+namespaces." The grant stays narrow in another dimension: scoped to
+exactly the resource type (core `ConfigMap`) the registered source
+watches, with no subresources. A bring-your-own source kind brings its
+own RBAC requirement, which is that source's registration
 responsibility, not something this service's own manifests grant
 implicitly.
+
+The two processes carry different grants, under separate service
+accounts. The resolver's is read-only. The webhook's adds the write
+verbs its secret-routing object needs, and those verbs live in a
+separate, separately-bound role so a deployment that pre-provisions that
+object instead can decline them entirely (see Secret delivery below).
+Neither process holds the other's permissions.
 
 ## Data flow
 
@@ -243,22 +264,22 @@ reflect the union of the latest data from all of them, not only whichever
 one changed most recently.
 
 **Alternatives considered:**
-- Replace the entire cached entry on every update — rejected: a change
+- Replace the entire cached entry on every update. Rejected: a change
   to one source object would silently discard every other source
   object's contribution to that scope, since only one event's data is
   available at the moment of replacement.
-- One shared, directly-mutated state object written by every watcher —
-  rejected: couples every watcher to the full shape of scope state,
+- One shared, directly-mutated state object written by every watcher.
+  Rejected: couples every watcher to the full shape of scope state,
   instead of only the portion it's responsible for.
 
 **Tradeoffs:** Patch-based merge means no single event ever has a
-complete picture of a scope's state — reasoning about "what does this
+complete picture of a scope's state: reasoning about "what does this
 scope look like right now" always means reading the merged result, not
 any one event. That's the right tradeoff for keeping every source object
 fully decoupled from every other source object's data shape. Each
 source's contribution is keyed by a cache-facing identity distinct from
 its externally-reported type, so two sources sharing an object name in
-the same scope don't collide — including two independently registered
+the same scope don't collide, including two independently registered
 sources of the same type, which a type-only key can't distinguish from
 each other. That identity defaults to the type itself when only one
 source of that type is registered, which is every source registered
@@ -267,7 +288,7 @@ a distinct identity is rejected outright at startup rather than allowed
 to silently collide at runtime.
 
 A scope's cache entry disappears entirely once every source object
-backing it is gone — there's no special-cased "identity" source whose
+backing it is gone: there's no special-cased "identity" source whose
 deletion behaves differently from any other. Every source object is a
 peer contributor to the same entry.
 
@@ -281,14 +302,14 @@ been loaded yet." Serving immediately would return a false negative for
 the second case.
 
 **Alternatives considered:**
-- Serve immediately and treat empty results as valid — rejected: produces
+- Serve immediately and treat empty results as valid. Rejected: produces
   incorrect "not found" answers during every cold start.
-- An external poll of cache state to gate traffic — rejected: adds
+- An external poll of cache state to gate traffic. Rejected: adds
   latency and a second, redundant source of truth for readiness.
 
 **Tradeoffs:** Every replica has a startup window where it can't serve
 traffic. This is bounded by how long the initial watch cycle takes, and
-it's the correct cost for guaranteeing no false negatives — the same
+it's the correct cost for guaranteeing no false negatives: the same
 signal is also surfaced to Kubernetes itself (see Observability
 considerations), so replicas in this state are held out of traffic
 automatically rather than by an internal check alone.
@@ -296,7 +317,7 @@ automatically rather than by an internal check alone.
 ## API boundaries
 
 **Decision:** The domain layer's public surface uses only primitives and
-its own types — no protocol-specific status codes or generated wire
+its own types: no protocol-specific status codes or generated wire
 types appear in it, and this boundary is enforced structurally (the
 domain layer has no dependency capable of expressing those types), not
 by convention alone.
@@ -307,7 +328,7 @@ be testable without standing up any transport machinery.
 
 **Alternatives considered:**
 - Allow the domain layer to depend on the transport layer's error types
-  directly, translating only at the very edge of the process — rejected:
+  directly, translating only at the very edge of the process. Rejected:
   makes the domain layer's correctness depend on a transport-specific
   concept (status codes) it has no reason to know about.
 
@@ -323,18 +344,18 @@ that a consumer should depend on an interface it owns.
 **Motivation:** Interfaces earn their cost when the concrete
 implementation is expensive or non-deterministic to construct (a
 database, a network call). The domain layer here is an in-memory
-lookup with no I/O — substituting a fake behind an interface would
+lookup with no I/O: substituting a fake behind an interface would
 reimplement the same logic under test, not remove a real dependency.
 
 **Alternatives considered:**
 - A transport-defined interface, satisfied by the concrete domain
-  service — rejected: no second implementation exists or is anticipated,
+  service. Rejected: no second implementation exists or is anticipated,
   and the interface would add a layer of indirection without a
   corresponding testing or flexibility benefit.
 
 **Tradeoffs:** If a second concrete implementation of the domain service
 ever appears (for example, a caching decorator in front of it), this
-decision gets revisited then — introducing the interface at that point
+decision gets revisited then: introducing the interface at that point
 costs nothing, since the language's interfaces are satisfied implicitly.
 
 **Decision:** Expose the API over gRPC, with query, resolve-everything,
@@ -349,13 +370,13 @@ operation gives clients a way to learn the currently active sources'
 shape without a separate document to keep in sync.
 
 **Alternatives considered:**
-- A REST/JSON API — rejected: would need a separate schema-discovery
+- A REST/JSON API. Rejected: would need a separate schema-discovery
   mechanism built by hand (gRPC reflection and a `Describe`-style RPC
   give this for free), and offers no benefit over gRPC for an
   internal, service-to-service contract.
 
 **Tradeoffs:** gRPC is a heavier client dependency than plain HTTP for
-any consumer outside the cluster's own service mesh — an acceptable cost
+any consumer outside the cluster's own service mesh, an acceptable cost
 given the API's actual consumer population.
 
 **Decision:** A dedicated `Resolve` operation returns everything
@@ -373,7 +394,7 @@ always see current state without reconnecting or invalidating anything
 client-side.
 
 **Alternatives considered:**
-- Bind a scope context to the connection once — rejected: introduces
+- Bind a scope context to the connection once. Rejected: introduces
   stale state for the lifetime of the connection, which is exactly the
   failure mode this system exists to prevent for its own consumers.
 
@@ -381,9 +402,9 @@ client-side.
 a `missing_keys` list, rather than rejected with an error. See
 [ADR-0009](adr/0009-no-fixed-key-whitelist.md) for the full reasoning.
 
-Errors cross this boundary through a fixed, small set of categories —
+Errors cross this boundary through a fixed, small set of categories:
 not-found, invalid input, temporarily unavailable, and an internal
-catch-all — mapped from domain-level failure identity, not from string
+catch-all. They are mapped from domain-level failure identity, not from string
 or type matching, since domain errors carry additional context by the
 time they reach this boundary and an equality check on the wrapped error
 would silently misclassify them.
@@ -393,10 +414,10 @@ would silently misclassify them.
 Two different things share the word "configuration" here, with different
 lifecycles:
 
-**The service's own configuration** — how this process itself is
+**The service's own configuration**: how this process itself is
 configured (where the Kubernetes credentials live, which address to bind,
 where to export telemetry, which label selector scopes the watched
-ConfigMaps) — is read once from the environment at startup and never
+ConfigMaps): is read once from the environment at startup and never
 changes for the life of the process. A replica that needs different
 configuration is restarted, not reconfigured in place.
 
@@ -405,32 +426,32 @@ built-in defaults, rather than a configuration file or command-line
 flags.
 
 **Motivation:** Environment variables are the natural configuration
-surface for a container running under Kubernetes — they're set directly
+surface for a container running under Kubernetes: they're set directly
 in the pod spec, need no file to mount, and every value has a sensible
 default so the service runs unconfigured in a local, single-cluster
 context.
 
 **Alternatives considered:**
-- A structured configuration file — rejected: adds a file to generate,
+- A structured configuration file. Rejected: adds a file to generate,
   mount, and keep in sync with the Deployment manifest, for a
   configuration surface small enough that a flat set of env vars is
   already unambiguous.
-- Command-line flags — rejected: less idiomatic for container
+- Command-line flags. Rejected: less idiomatic for container
   configuration than environment variables, and harder to override per
   environment without templating the container's command.
 
-**Consumer-owned runtime configuration** — the actual data this service
-exists to serve — has a completely different lifecycle: it's owned and
+**Consumer-owned runtime configuration**: the actual data this service
+exists to serve: has a completely different lifecycle: it's owned and
 changed by whatever creates and edits the underlying ConfigMaps (or other
 registered source objects), continuously observed rather than loaded
 once, and reflected into the cache within the watch layer's event
-latency. It has no expiry or version history inside this service — the
+latency. It has no expiry or version history inside this service: the
 cache always reflects the latest observed state, nothing more.
 
 ## Multi-tenancy is a usage pattern, not an architecture
 
 Muninn resolves configuration by namespace because Kubernetes namespaces
-are a natural, existing scope boundary — not because this service models
+are a natural, existing scope boundary: not because this service models
 tenants. Nothing in the domain layer, the cache, or the API contract
 represents a tenant, validates tenant identity, or enforces isolation
 between namespaces beyond what a caller's own network access already
@@ -439,7 +460,7 @@ allows.
 A consumer adopting a namespace-per-tenant convention (one namespace per
 tenant, a ConfigMap per namespace) gets isolation that composes with
 Kubernetes' own RBAC and network-policy primitives at the namespace
-level — but that composition is the consumer's architecture, not
+level, but that composition is the consumer's architecture, not
 something this service defines. A namespace boundary without a service
 mesh or network policy actually validating caller identity at the edge is
 an organizational convention, not a security boundary; see
@@ -455,12 +476,15 @@ reasoning.
 ## Security considerations
 
 Access to the Kubernetes API is scoped as narrowly as the integration
-model allows: read-only (list/watch, never write) on exactly the
-resource type the registered `ConfigSource` needs, with no access to any
-subresource this service never reads or writes.
+model allows, and separately per process. The resolver reads only: watch
+access to exactly the resource type the registered `ConfigSource` needs,
+with no write verbs and no subresources. The webhook holds that same read
+access plus the ability to create and update one derived object type, in
+one namespace at a time, carrying routing information rather than secret
+material (see Secret delivery).
 
 The runtime environment is hardened independently of any single
-mechanism — both the resolver and the webhook processes run as a
+mechanism: both the resolver and the webhook processes run as a
 non-root user with a read-only root filesystem, no privilege escalation,
 and no Linux capabilities, layered on top of (not merely inherited from)
 a minimal, non-root base container image. Neither layer relies on the
@@ -473,7 +497,7 @@ for the full reasoning.
 **Tradeoffs:** As built, network-level access to the gRPC API is the only
 access control in effect for direct callers, independent of whether TLS
 is enabled on it. A real deployment of this pattern would additionally
-need to sit behind cluster-internal network policy or an API gateway —
+need to sit behind cluster-internal network policy or an API gateway.
 this is stated as an explicit limitation of the reference implementation,
 not an oversight.
 
@@ -484,7 +508,7 @@ mesh that already terminates mutual TLS at the sidecar can leave the gRPC
 server plaintext (the default), while a consumer with no mesh in front of
 it can configure a certificate and have the gRPC server terminate TLS
 directly. Neither posture is privileged over the other in the
-implementation — the reference deployment defaults to plaintext because
+implementation: the reference deployment defaults to plaintext because
 it assumes a mesh, not because TLS termination elsewhere is structurally
 required. The same configurability extends to the shared gRPC dial helper
 used by both the debugging CLI and the webhook's injected containers,
@@ -494,21 +518,22 @@ since they connect to the same server.
 one.** The admission webhook sits on a different trust boundary than the
 gRPC API: it is called by the Kubernetes API server itself, over TLS the
 API server requires unconditionally for every registered admission
-webhook — there is no plaintext option, unlike the gRPC API. That
+webhook: there is no plaintext option, unlike the gRPC API. That
 certificate is issued by an in-cluster certificate authority (not built
 or trusted by this service), with the CA bundle the API server needs to
 validate it kept in sync automatically rather than hand-copied into the
 webhook registration.
 
-No credentials pass through this service in either direction — whatever
-values a ConfigMap or other source object carries are configuration data,
-not credentials, and this service's own Kubernetes access uses no
-long-lived static credentials beyond whatever the cluster's own
-service-account token mechanism provides.
+No secret value passes through either process in either direction. The
+values a source object carries are configuration data; where a secret is
+involved, what the object carries is a reference to it and never the
+value, and the fetch happens outside this system entirely (see Secret
+delivery). This system's own Kubernetes access uses no long-lived static
+credentials beyond the cluster's own service-account token mechanism.
 
 ## The admission webhook as a delivery mechanism
 
-The gRPC API requires a consumer to embed a client and call it — a real,
+The gRPC API requires a consumer to embed a client and call it, a real,
 if small, integration cost. The admission webhook exists to remove that
 cost entirely for consumers who would rather read a file.
 
@@ -523,7 +548,7 @@ opt-in at the object level, not at the webhook-registration level.
 
 **Alternatives considered:**
 - A namespace-level opt-in (a label on the namespace, matched via the
-  webhook's own `namespaceSelector`) — rejected as the sole mechanism:
+  webhook's own `namespaceSelector`). Rejected as the sole mechanism:
   it would opt in every Pod in a namespace uniformly, when the actual
   decision belongs at the level of an individual workload that wants
   config delivered this way.
@@ -531,7 +556,7 @@ opt-in at the object level, not at the webhook-registration level.
 **Decision:** For an opted-in Pod, the webhook injects a shared `emptyDir`
 volume, an init container that resolves the scope once and writes it to
 that volume, and a sidecar that re-resolves on an interval and rewrites
-the file only when the content actually changed — and mounts that same
+the file only when the content actually changed, and mounts that same
 volume into every container the Pod already had, not only the containers
 the webhook adds.
 
@@ -539,20 +564,20 @@ the webhook adds.
 itself injects would leave the actual application with no way to read
 the resolved file without the consumer separately declaring a matching
 `volumeMount` by hand, using an internal volume name and path this
-service owns — undercutting the entire point of a zero-client-code
+service owns: undercutting the entire point of a zero-client-code
 integration path.
 
 **Alternatives considered:**
 - Mount the volume only into the webhook's own injected containers,
-  leaving the application container's manifest untouched — rejected: the
+  leaving the application container's manifest untouched. Rejected: the
   application would still need to declare its own `volumeMount` against
   an internal naming convention, which is exactly the integration cost
   this delivery path exists to remove.
 
 **Tradeoffs:** The webhook mutates containers it didn't create, which is
 a broader patch surface than injecting new containers alone. Every piece
-of the patch — the volume, the init container, the sidecar, and each
-container's mount — is checked for existence by name or by mount name
+of the patch: the volume, the init container, the sidecar, and each
+container's mount: is checked for existence by name or by mount name
 before being added, so a webhook re-invoked for the same admission
 request produces the same result rather than a duplicate.
 
@@ -564,13 +589,13 @@ file doesn't exist yet.
 **Motivation:** Once an init container has written a first, valid file,
 a transient failure on a later poll (a momentary network blip, a
 temporarily unreachable resolver replica) shouldn't take the consuming
-Pod down — the last-known-good file is still usable. The same failure on
+Pod down: the last-known-good file is still usable. The same failure on
 the very first write has nothing to fall back on, so it has to surface as
 a real failure instead of running forever with no file in place.
 
 **Alternatives considered:**
 - Treat every poll failure identically, regardless of whether a file
-  already exists — rejected: would either mask the fatal "never
+  already exists. Rejected: would either mask the fatal "never
   successfully resolved" case behind silent retries forever, or make
   every transient blip after a successful start fatal, depending on
   which behavior was picked uniformly.
@@ -578,15 +603,123 @@ a real failure instead of running forever with no file in place.
 The init container and sidecar are the same binary as the resolver and
 the webhook itself, invoked in a distinct mode that performs a single
 resolve-and-write (or a resolve-poll-write loop) against the same gRPC
-API a direct caller would use — see
+API a direct caller would use: see
 [ADR-0011](adr/0011-resolve-rpc.md) for why that mode calls a dedicated
 `Resolve` RPC rather than `Query`.
+
+## Availability boundaries
+
+The webhook and the resolver sit on different criticality tiers. The
+resolver's unavailability degrades one query at a time. The webhook sits
+on the API server's admission path under a failure policy that blocks Pod
+creation, so its unavailability is a scheduling outage across every
+namespace it applies to.
+
+**Decision:** The webhook resolves configuration in its own process,
+against its own watch layer and cache, rather than calling the resolver's
+API during admission.
+
+**Motivation:** An admission decision that depends on another service
+converts that service's unavailability into a cluster-wide scheduling
+failure. The observable symptom is "Pods will not schedule," which points
+away from the actual cause, so the failure is also expensive to diagnose
+under time pressure.
+
+**Alternatives considered:**
+- Call the resolver's API during admission. Rejected: the two
+  components' availability profiles are deliberately separate, and a
+  synchronous call at admission time collapses them into the stricter one.
+- Cache resolver responses inside the webhook and serve stale data when
+  the resolver is unreachable. Rejected: a second caching layer with its
+  own staleness semantics, to avoid a dependency that does not need to
+  exist, given the domain layer takes no Kubernetes dependency and can
+  simply be instantiated twice.
+
+**Tradeoffs:** A second watch of the same objects, so memory and API
+server watch load scale with the number of processes rather than being
+shared. Accepted deliberately: an admission decision then depends only on
+the Kubernetes API, which every admission webhook already depends on
+unconditionally.
+
+The injected containers are unaffected by this and still call the gRPC
+API. They run inside the consumer's Pod after admission has completed, so
+a resolver outage delays a config refresh rather than blocking scheduling.
+
+**Decision:** The webhook's registration excludes the namespaces required
+to recover from the webhook itself being unavailable.
+
+**Motivation:** Under a blocking failure policy, an unreachable webhook
+prevents Pod creation wherever it applies, including the namespace that
+would host its own replacement. Excluding its own namespace and the
+control plane's keeps the failure recoverable rather than self-sealing.
+
+## Secret delivery
+
+Consumers need secrets alongside their configuration, delivered with the
+same "no client code required" property the file-based path already gives
+plain configuration. The resolver's own data path must stay free of
+secret material: the query API performs no caller authentication (see
+[ADR-0003](adr/0003-no-caller-auth-on-query-api.md)) on the premise that
+nothing flowing through it grants access to anything else.
+
+**Decision:** A secret is represented in configuration only by reference,
+never by value. The delivery layer derives, from those references, a
+per-namespace object describing what an external secret-store driver
+should fetch, and injects a volume backed by that driver. The driver and
+its store-specific plugin perform the fetch and the mount outside this
+system's processes entirely. See
+[ADR-0012](adr/0012-csi-secret-delivery.md) for the full reasoning and a
+trust-boundary diagram.
+
+A reference is a configuration key carrying a fixed suffix, whose value
+is a URI naming where the real secret lives. Two optional companion keys
+sharing the same prefix complete the convention: one names the field to
+extract from within that secret, and one records the path the value will
+be mounted at, for the consumer's own documentation. Only the reference
+itself is interpreted.
+
+**Motivation:** The value never transits or rests inside this system, so
+no part of it needs to be trusted with secret material or capable of
+leaking it. What the delivery layer takes on is an orchestration
+responsibility: deriving a correct routing object: without the
+underlying security responsibility.
+
+**Alternatives considered:**
+- Watch secret objects as another configuration source. Rejected: any
+  path that feeds secret material into the cache the unauthenticated API
+  serves reopens the invariant that API depends on, however the watching
+  is implemented.
+- Fetch from the external store within this system and cache the result.
+  Rejected for the same reason: the mechanism differs, but a secret value
+  would still rest inside the process.
+
+**Tradeoffs:** Two deployment postures follow from who owns the derived
+object's lifecycle, selected by configuration. In the default, the
+delivery layer creates and updates it, so configuration remains the single
+place an operator declares what a namespace needs. In the other, a
+platform team pre-provisions it and the delivery layer only validates it,
+rejecting admission when it does not describe the secrets configuration
+references. The second posture requires no write access at all, at the
+cost of two objects an operator must keep agreeing with each other.
+
+Validation in that second posture compares the derived content of the
+object, not its serialized form. An operator writing the object by hand
+cannot reproduce a generated serialization exactly, and formatting
+carries no meaning to the driver. An entry the configuration does not
+reference is still rejected, because the driver mounts every entry the
+object names, and an unreferenced one would deliver a secret the consumer
+never asked for.
+
+**A mount performed this way is immutable for the life of the Pod.** A
+reference added after a Pod is running can be observed and surfaced, but
+not applied retroactively. The sidecar reports it and leaves the decision
+to restart to an operator, rather than acting on it silently.
 
 ## Observability considerations
 
 Every gRPC request and every admission webhook request produces a
 distributed trace span, structured log entries, and metric
-observations — three complementary views of the same event, each suited
+observations: three complementary views of the same event, each suited
 to a different question (a trace answers "what happened in this one
 request," logs answer "what happened around this specific event," metrics
 answer "what does behavior look like in aggregate").
@@ -603,7 +736,7 @@ chose to capture.
 
 **Alternatives considered:**
 - A flat sampling ratio applied to every span regardless of inbound
-  context — rejected: breaks end-to-end traces whenever this service's
+  context. Rejected: breaks end-to-end traces whenever this service's
   independently-rolled decision disagreed with an upstream caller's.
 
 **Decision:** The tracer provider is passed to each transport's
@@ -619,7 +752,7 @@ either server is built; relying on the global would make correctness
 depend on incidental construction order instead of a declared dependency.
 
 **Decision:** Metric labels carry only bounded, low-cardinality
-dimensions (operation name, outcome) — scope identifier (namespace) is
+dimensions (operation name, outcome): scope identifier (namespace) is
 deliberately excluded from metric labels.
 
 **Motivation:** Namespace names are operator-controlled and effectively
@@ -629,25 +762,25 @@ namespaces are added, which is a correctness and resource-usage risk, not
 merely a style preference.
 
 **Alternatives considered:**
-- Include namespace as a metric label for per-scope dashboards —
+- Include namespace as a metric label for per-scope dashboards.
   rejected: the cardinality risk outweighs the benefit; per-scope detail
   belongs in traces and logs, which are built for high-cardinality
   dimensions, not in metrics.
 
 **Tradeoffs:** Per-namespace behavior isn't directly visible in aggregate
-metrics — answering "how is this specific namespace doing" requires
+metrics: answering "how is this specific namespace doing" requires
 looking at traces or logs instead. That's an acceptable division of
 responsibility across the three observability signals.
 
 The same readiness signal that gates traffic (see Data flow) is also
-what an external health check observes — a replica whose cache hasn't
+what an external health check observes, a replica whose cache hasn't
 finished its initial sync is excluded from traffic by the platform
 itself, not only by an internal check nothing outside the process can
 see.
 
 Outbound calls this service makes to the Kubernetes API are not
 themselves traced. Extending tracing to cover them is a real, bounded
-extension — deliberately out of scope for now rather than an oversight.
+extension: deliberately out of scope for now rather than an oversight.
 
 ## Testing strategy
 
@@ -657,13 +790,13 @@ Four tiers, each validating a different layer of the integration model:
 and control plane, not a fake or mocked client.
 
 **Motivation:** This service's correctness depends on real API server
-behavior — defaulting, validation, and watch semantics — that a fake
+behavior: defaulting, validation, and watch semantics: that a fake
 client doesn't reproduce faithfully. A bug that only manifests against
 real API server behavior would pass against a fake and fail in any real
 cluster.
 
 **Alternatives considered:**
-- A fake or mocked Kubernetes client — rejected for integration-level
+- A fake or mocked Kubernetes client. Rejected for integration-level
   tests: faster and simpler, but validates against an approximation of
   API server behavior rather than the behavior itself.
 
@@ -685,53 +818,66 @@ the actual deploy path, end to end, validates the second one.
 
 **Alternatives considered:**
 - Provision the same resources via a Kubernetes client library, as the
-  lower-level integration tests do — rejected for this tier
+  lower-level integration tests do. Rejected for this tier
   specifically: would validate that the resources *can* be created, not
   that the actual, human-facing deployment path produces a working
   system.
 
 **Tradeoffs:** This tier requires a real cluster and a pre-built,
 pre-loaded container image, and is consequently run on demand rather
-than on every change — a deliberate cost/signal tradeoff for a check
+than on every change, a deliberate cost/signal tradeoff for a check
 that's expensive to run continuously.
 
-**Decision:** The admission webhook's actual admission-time behavior
-(does an unannotated Pod schedule untouched, does an annotated Pod
-actually get injected, does `failurePolicy: Fail` avoid collateral
-blast radius) is verified manually against a real cluster with the
-webhook registered for real, rather than only through unit tests against
-the patch-building logic in isolation.
+**Decision:** The admission webhook's core admission-time behavior: does
+an annotated Pod actually get injected, does the sidecar rewrite the file
+on drift: is exercised by an automated end-to-end test against a real
+cluster with the webhook registered for real, not only through unit
+tests against the patch-building logic in isolation. A second, heavier
+automated tier additionally exercises the CSI secret-delivery path: a
+webhook-generated (not hand-written) secret-provisioning object, and a
+real secret landing in the same Pod as its config, against a disposable
+cluster provisioned for that test run. Two narrower claims: does an
+*unannotated* Pod schedule untouched, does `failurePolicy: Fail` avoid
+collateral blast radius across unrelated Pods: remain verified manually
+against a real cluster rather than automated.
 
 **Motivation:** Unit tests against the patch-building logic (and they
 exist, including idempotency and content assertions, not just
 presence-of-a-patch checks) can verify the JSON Patch a request produces
 is structurally correct. They cannot verify that a real Kubernetes API
 server accepts that patch, that a real `kubelet` can actually start the
-resulting Pod spec, or that an unrelated, unannotated Pod's admission is
-unaffected — claims that only hold if demonstrated against the real
-admission path, not approximated.
+resulting Pod spec, that a real CSI driver can actually mount a secret
+from the object the webhook generated, or that an unrelated, unannotated
+Pod's admission is unaffected: claims that only hold if demonstrated
+against the real admission path, not approximated.
 
 **Alternatives considered:**
-- Rely on unit tests against the patch-building logic alone — rejected:
-  this project's own history includes defects (a volume patch that
-  silently added an empty array instead of the volume, an
-  init-container patch path that a real API server rejects) that passed
-  every unit test in place at the time and were only caught by sending a
-  real admission request through a real webhook server.
+- Rely on unit tests against the patch-building logic alone. Rejected:
+  whole classes of defect are invisible to them by construction. A patch
+  can be structurally valid and still be rejected by a real API server;
+  an RBAC verb can be wrong in a way no fake client enforces; a volume
+  reference can name the driver rather than the volume, which only a real
+  kubelet distinguishes. Each is caught by sending a real admission
+  request through a real webhook server, or attempting a real mount
+  through a real driver, and by nothing cheaper.
+- Automate the remaining manual-only claims (unannotated-Pod-untouched,
+  `failurePolicy` blast radius) the same way: considered, not yet done;
+  no design obstacle, just not built.
 
-**Tradeoffs:** This tier is not automated and does not run in CI — it
-requires a real cluster, a registered `MutatingWebhookConfiguration`, and
-manual cleanup afterward. Building an automated equivalent would mean
-provisioning a real Kubernetes API server that actually invokes a webhook
-over its registered admission path, a heavier integration-test tier than
-this project's automated suite currently covers. The unit-level patch
-tests still run in CI and catch regressions in the patch-building logic
-itself; this tier catches the class of defect those tests structurally
-cannot.
+**Tradeoffs:** The two still-manual claims require a real cluster, a
+registered `MutatingWebhookConfiguration`, and manual cleanup afterward,
+with no CI signal protecting them from regressing silently. The
+automated tiers are also not wired into CI: they need a real cluster
+(and, for the CSI tier, `kind`/`helm`/a container engine on top of
+that), but do at least run on demand without a human driving each step.
+The unit-level patch tests still run in CI and catch regressions in the
+patch-building logic itself; the automated end-to-end tiers catch the
+class of defect those tests structurally cannot, and the two remaining
+manual claims catch what even those can't yet.
 
 Below all of these, the domain layer's resolution logic, the transport
 layer's request/response translation, and the webhook's patch-building
-logic are validated in isolation and without any external dependency —
+logic are validated in isolation and without any external dependency:
 cheap, fast checks for the large majority of this system's logic that has
 nothing to do with Kubernetes, the network, or a real admission request
 at all.
@@ -750,7 +896,7 @@ alongside this service. See
 
 **Motivation:** Merging layered configuration from multiple sources
 through a pluggable loader is a distinct engineering problem from
-watching and caching Kubernetes objects — the problem this service
+watching and caching Kubernetes objects: the problem this service
 actually exists to demonstrate. Building both into one repository would
 blur two separable concerns rather than sharpen either. The admission
 webhook, not a client library, is the delivered path for consumers who
