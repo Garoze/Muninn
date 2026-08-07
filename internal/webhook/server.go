@@ -24,6 +24,25 @@ func NewServer(cfg *config.Config, h *Handler, log *zap.Logger, tp *sdktrace.Tra
 	mux := http.NewServeMux()
 	mux.Handle("/mutate", otelhttp.NewHandler(h, "mutate", otelhttp.WithTracerProvider(tp)))
 
+	// Liveness only proves the TLS listener is up. It must not depend on cache
+	// sync, or a slow initial list would restart the process instead of just
+	// holding it out of traffic.
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	// Readiness additionally requires a synced config cache. Until then the
+	// handler admits annotated Pods without injecting anything, so routing to
+	// this replica would silently skip injection for every Pod created in the
+	// window.
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if !h.svc.Cache.IsSynced() {
+			http.Error(w, "config cache not synced", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	})
+
 	log.Info("webhook TLS server configured",
 		zap.String("addr", cfg.WebhookAddr),
 		zap.String("cert_path", cfg.WebhookTLSCertPath),

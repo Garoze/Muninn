@@ -1,6 +1,8 @@
 package webhook
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -49,7 +51,7 @@ func freshPod() *corev1.Pod {
 	}
 }
 
-// opsByPath indexes ops by Path for convenient assertions, since BuildPath's
+// opsByPath indexes ops by Path for convenient assertions, since BuildPatch's
 // exact op ordering is an implementation detail, not part of its contract.
 func opsByPath(ops []patchOperation) map[string]patchOperation {
 	m := make(map[string]patchOperation, len(ops))
@@ -59,9 +61,9 @@ func opsByPath(ops []patchOperation) map[string]patchOperation {
 	return m
 }
 
-func TestBuildPath_FreshPod_AddsVolumeInitSidecarAndAppMount(t *testing.T) {
+func TestBuildPatch_FreshPod_AddsVolumeInitSidecarAndAppMount(t *testing.T) {
 	pod := freshPod()
-	ops := BuildPath(pod, "acme", testConfig())
+	ops := BuildPatch(pod, "acme", testConfig(), nil)
 
 	if len(ops) != 4 {
 		t.Fatalf("got %d ops, want 4: %+v", len(ops), ops)
@@ -130,7 +132,81 @@ func TestBuildPath_FreshPod_AddsVolumeInitSidecarAndAppMount(t *testing.T) {
 	}
 }
 
-func TestBuildPath_ExistingVolumesAndInitContainers_ReplacesWholeField(t *testing.T) {
+// TestBuildPatch_WithSecretRefs_AddsCSIVolumeAndMount is a regression test
+// for the CSI VolumeMount.Name having to match csiSecretVolume's Volume.Name
+// (muninn-secrets) rather than the CSI driver's own name
+// (secrets-store.csi.x-k8s.io) - a mismatch there passes admission but the
+// kubelet then rejects the Pod outright at mount time, since a VolumeMount
+// references a volume in the same Pod spec, not the driver serving it.
+func TestBuildPatch_WithSecretRefs_AddsCSIVolumeAndMount(t *testing.T) {
+	pod := freshPod()
+	refs := []SecretRef{{Key: "db_password_ref", ObjectName: "db_password", Provider: "vault", Path: "secret/data/prod/db-password"}}
+
+	ops := BuildPatch(pod, "acme", testConfig(), refs)
+	byPath := opsByPath(ops)
+
+	volOp, ok := byPath["/spec/volumes"]
+	if !ok {
+		t.Fatal("missing /spec/volumes add op")
+	}
+	vols, ok := volOp.Value.([]corev1.Volume)
+	if !ok || len(vols) != 2 {
+		t.Fatalf("volumes op value: got %+v, want config volume + CSI secrets volume", volOp.Value)
+	}
+	csiVol := vols[1]
+	if csiVol.Name != csiVolumeName {
+		t.Errorf("CSI volume name: got %q, want %q", csiVol.Name, csiVolumeName)
+	}
+	if csiVol.CSI == nil || csiVol.CSI.Driver != csiDriverName {
+		t.Fatalf("CSI volume source: got %+v", csiVol.VolumeSource)
+	}
+	if csiVol.CSI.ReadOnly == nil || !*csiVol.CSI.ReadOnly {
+		t.Error("expected CSI volume to be ReadOnly")
+	}
+	wantSPC := "muninn-secrets-acme"
+	if got := csiVol.CSI.VolumeAttributes["secretProviderClass"]; got != wantSPC {
+		t.Errorf("secretProviderClass attribute: got %q, want %q", got, wantSPC)
+	}
+
+	mountOp, ok := byPath["/spec/containers/0/volumeMounts"]
+	if !ok {
+		t.Fatal("missing /spec/containers/0/volumeMounts add op")
+	}
+	mounts, ok := mountOp.Value.([]corev1.VolumeMount)
+	if !ok || len(mounts) != 2 {
+		t.Fatalf("app container volumeMounts op value: got %+v, want config mount + CSI mount", mountOp.Value)
+	}
+	csiMount := mounts[1]
+	// The mount must reference the Volume.Name added above (csiVolumeName),
+	// not the CSI driver's own name - that was the actual bug.
+	if csiMount.Name != csiVolumeName {
+		t.Errorf("CSI volume mount Name: got %q, want %q (must match the Volume.Name, not the driver name)", csiMount.Name, csiVolumeName)
+	}
+	if csiMount.MountPath != csiMountPath {
+		t.Errorf("CSI volume mount path: got %q, want %q", csiMount.MountPath, csiMountPath)
+	}
+	if !csiMount.ReadOnly {
+		t.Error("expected CSI volume mount to be ReadOnly")
+	}
+}
+
+func TestBuildPatch_NoSecretRefs_NoCSIVolumeOrMount(t *testing.T) {
+	pod := freshPod()
+	ops := BuildPatch(pod, "acme", testConfig(), nil)
+	byPath := opsByPath(ops)
+
+	vols := byPath["/spec/volumes"].Value.([]corev1.Volume)
+	if len(vols) != 1 {
+		t.Errorf("expected only the config volume with no refs, got %+v", vols)
+	}
+
+	mounts := byPath["/spec/containers/0/volumeMounts"].Value.([]corev1.VolumeMount)
+	if len(mounts) != 1 {
+		t.Errorf("expected only the config mount with no refs, got %+v", mounts)
+	}
+}
+
+func TestBuildPatch_ExistingVolumesAndInitContainers_ReplacesWholeField(t *testing.T) {
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Volumes: []corev1.Volume{{Name: "other-volume"}},
@@ -146,7 +222,7 @@ func TestBuildPath_ExistingVolumesAndInitContainers_ReplacesWholeField(t *testin
 		},
 	}
 
-	ops := BuildPath(pod, "acme", testConfig())
+	ops := BuildPatch(pod, "acme", testConfig(), nil)
 	byPath := opsByPath(ops)
 
 	volOp, ok := byPath["/spec/volumes"]
@@ -186,7 +262,7 @@ func TestBuildPath_ExistingVolumesAndInitContainers_ReplacesWholeField(t *testin
 	}
 }
 
-func TestBuildPath_AlreadyInjected_IsIdempotent(t *testing.T) {
+func TestBuildPatch_AlreadyInjected_IsIdempotent(t *testing.T) {
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Volumes: []corev1.Volume{
@@ -208,9 +284,103 @@ func TestBuildPath_AlreadyInjected_IsIdempotent(t *testing.T) {
 		},
 	}
 
-	ops := BuildPath(pod, "acme", testConfig())
+	ops := BuildPatch(pod, "acme", testConfig(), nil)
 	if len(ops) != 0 {
 		t.Errorf("expected no ops for an already-fully-injected Pod (idempotency), got %+v", ops)
+	}
+}
+
+// TestBuildPatch_AlreadyInjected_WithRefs_IsIdempotent is the refs-bearing
+// counterpart to TestBuildPatch_AlreadyInjected_IsIdempotent. The injected
+// sidecar is in Spec.Containers by the time a re-invoked admission runs, so
+// mounting the CSI secrets volume into every container would emit an op for it
+// and put consumer secrets inside a Muninn-authored container.
+func TestBuildPatch_AlreadyInjected_WithRefs_IsIdempotent(t *testing.T) {
+	cfg := testConfig()
+	refs := []SecretRef{{Key: "db_password_ref", ObjectName: "db_password", Provider: "vault", Path: "secret/data/prod/db-password"}}
+
+	// Build the Pod the way a first admission actually leaves it, rather than
+	// hand-writing the expected shape, so this can't drift from BuildPatch.
+	fresh := &corev1.Pod{
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+	}
+	injected := applyOps(t, fresh, BuildPatch(fresh, "acme", cfg, refs))
+
+	ops := BuildPatch(injected, "acme", cfg, refs)
+	if len(ops) != 0 {
+		t.Errorf("expected no ops re-invoking on an already-injected Pod with refs, got %+v", ops)
+	}
+
+	for _, c := range injected.Spec.Containers {
+		if c.Name != sidecarContainerName {
+			continue
+		}
+		for _, m := range c.VolumeMounts {
+			if m.Name == csiVolumeName {
+				t.Errorf("sidecar must not mount the consumer's secrets volume, got %+v", c.VolumeMounts)
+			}
+		}
+	}
+}
+
+// applyOps applies the subset of JSON Patch ops BuildPatch emits (add/replace on
+// whole spec fields) so a test can work from the Pod a real admission produces.
+func applyOps(t *testing.T, pod *corev1.Pod, ops []patchOperation) *corev1.Pod {
+	t.Helper()
+
+	out := pod.DeepCopy()
+	for _, op := range ops {
+		switch {
+		case op.Path == "/spec/volumes":
+			out.Spec.Volumes = op.Value.([]corev1.Volume)
+		case op.Path == "/spec/initContainers":
+			out.Spec.InitContainers = op.Value.([]corev1.Container)
+		case op.Path == "/spec/containers":
+			out.Spec.Containers = op.Value.([]corev1.Container)
+		case strings.HasPrefix(op.Path, "/spec/containers/") && strings.HasSuffix(op.Path, "/volumeMounts"):
+			idx, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(op.Path, "/spec/containers/"), "/volumeMounts"))
+			if err != nil {
+				t.Fatalf("unexpected container index in path %q: %v", op.Path, err)
+			}
+			out.Spec.Containers[idx].VolumeMounts = op.Value.([]corev1.VolumeMount)
+		default:
+			t.Fatalf("applyOps does not handle path %q", op.Path)
+		}
+	}
+	return out
+}
+
+// The webhook adds these containers to a Pod its owner did not write, so they
+// have to satisfy the namespace's own admission constraints unaided: a
+// ResourceQuota rejects containers without requests and limits, and the
+// restricted Pod Security standard rejects an unset securityContext.
+func TestBuildResolveContainer_SetsResourcesAndSecurityContext(t *testing.T) {
+	for _, watch := range []bool{false, true} {
+		c := buildResolveContainer("muninn-test", "acme", testConfig(), watch)
+
+		if c.Resources.Requests.Cpu().IsZero() || c.Resources.Requests.Memory().IsZero() {
+			t.Errorf("watch=%v: missing resource requests: %+v", watch, c.Resources)
+		}
+		if c.Resources.Limits.Cpu().IsZero() || c.Resources.Limits.Memory().IsZero() {
+			t.Errorf("watch=%v: missing resource limits: %+v", watch, c.Resources)
+		}
+
+		sc := c.SecurityContext
+		if sc == nil {
+			t.Fatalf("watch=%v: missing securityContext", watch)
+		}
+		if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+			t.Errorf("watch=%v: allowPrivilegeEscalation must be false", watch)
+		}
+		if sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+			t.Errorf("watch=%v: runAsNonRoot must be true", watch)
+		}
+		if sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
+			t.Errorf("watch=%v: readOnlyRootFilesystem must be true", watch)
+		}
+		if sc.Capabilities == nil || len(sc.Capabilities.Drop) != 1 || sc.Capabilities.Drop[0] != "ALL" {
+			t.Errorf("watch=%v: capabilities must drop ALL, got %+v", watch, sc.Capabilities)
+		}
 	}
 }
 
@@ -221,7 +391,7 @@ func TestAppVolumeMountOps_MultipleContainers_MixedState(t *testing.T) {
 		{Name: "has-other-mount", VolumeMounts: []corev1.VolumeMount{{Name: "unrelated", MountPath: "/x"}}},
 	}
 
-	ops := appVolumeMountOps(containers)
+	ops := appVolumeMountOps(containers, nil)
 	byPath := opsByPath(ops)
 
 	if len(ops) != 2 {
@@ -250,6 +420,32 @@ func TestWithVolumeMount(t *testing.T) {
 	got := withVolumeMount(mounts, corev1.VolumeMount{Name: "c"})
 	if len(got) != 3 || got[2].Name != "c" {
 		t.Errorf("expected mount appended for a new name, got %+v", got)
+	}
+}
+
+func TestWithVolume(t *testing.T) {
+	vols := []corev1.Volume{{Name: "a"}, {Name: "b"}}
+
+	if got := withVolume(vols, corev1.Volume{Name: "a", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}); len(got) != 2 {
+		t.Errorf("expected no change for an already-present name, got %+v", got)
+	}
+
+	got := withVolume(vols, corev1.Volume{Name: "c"})
+	if len(got) != 3 || got[2].Name != "c" {
+		t.Errorf("expected volume appended for a new name, got %+v", got)
+	}
+}
+
+func TestWithContainer(t *testing.T) {
+	containers := []corev1.Container{{Name: "a"}, {Name: "b"}}
+
+	if got := withContainer(containers, corev1.Container{Name: "a", Image: "different:latest"}); len(got) != 2 {
+		t.Errorf("expected no change for an already-present name, got %+v", got)
+	}
+
+	got := withContainer(containers, corev1.Container{Name: "c"})
+	if len(got) != 3 || got[2].Name != "c" {
+		t.Errorf("expected container appended for a new name, got %+v", got)
 	}
 }
 

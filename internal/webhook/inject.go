@@ -7,6 +7,7 @@ import (
 	"github.com/garoze/muninn/internal/config"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 const (
@@ -20,6 +21,10 @@ const (
 	initContainerName    = "muninn-resolve-init"
 	sidecarContainerName = "muninn-resolve-sidecar"
 	sidecarWatchInterval = "15s"
+
+	csiVolumeName = "muninn-secrets"
+	csiMountPath  = "/mnt/secrets-store"
+	csiDriverName = "secrets-store.csi.k8s.io"
 )
 
 // patchOperation is a single RFC 6902 JSON Patch operation.
@@ -34,19 +39,22 @@ func ShouldInject(pod *corev1.Pod) bool {
 	return pod.GetAnnotations()[InjectAnnotation] == "true"
 }
 
-// BuildPath returns the JSON Patch operations needed to inject the shared
-// volume, init container, and sidecar into pod, and to mount that volume
+// BuildPatch returns the JSON Patch operations needed to inject the shared
+// volume, init container, and sidecar into pod, and to mount those volumes
 // into every existing container - or nil if already present. namespace comes
 // from the AdmissionRequest rather than pod.Namespace, since the latter may
-// be unpopulated by the client at admission time.
+// be unpopulated by the client at admission time. refs being non-empty adds
+// the CSI secrets volume/mount alongside the config ones; the caller is
+// responsible for having already reconciled the SecretProviderClass refs
+// point at.
 //
 // Idempotent via equality.Semantic.DeepEqual against each relevant Pod spec
 // field: a webhook re-invoked for the same admission request produces zero
 // ops instead of duplicating a volume/container/mount.
-func BuildPath(pod *corev1.Pod, namespace string, cfg *config.Config) []patchOperation {
+func BuildPatch(pod *corev1.Pod, namespace string, cfg *config.Config, refs []SecretRef) []patchOperation {
 	var ops []patchOperation
 
-	if op := volumesOp(pod.Spec.Volumes); op != nil {
+	if op := volumesOp(pod.Spec.Volumes, namespace, refs); op != nil {
 		ops = append(ops, *op)
 	}
 
@@ -58,18 +66,22 @@ func BuildPath(pod *corev1.Pod, namespace string, cfg *config.Config) []patchOpe
 		ops = append(ops, *op)
 	}
 
-	ops = append(ops, appVolumeMountOps(pod.Spec.Containers)...)
+	ops = append(ops, appVolumeMountOps(pod.Spec.Containers, refs)...)
 
 	return ops
 }
 
-func volumesOp(current []corev1.Volume) *patchOperation {
+func volumesOp(current []corev1.Volume, namespace string, refs []SecretRef) *patchOperation {
 	vol := corev1.Volume{
 		Name:         volumeName,
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 	}
 
 	desired := withVolume(current, vol)
+	if len(refs) > 0 {
+		desired = withVolume(desired, csiSecretVolume(namespace))
+	}
+
 	if equality.Semantic.DeepEqual(desired, current) {
 		return nil
 	}
@@ -79,7 +91,26 @@ func volumesOp(current []corev1.Volume) *patchOperation {
 	if len(current) == 0 {
 		return &patchOperation{Op: "add", Path: "/spec/volumes", Value: desired}
 	}
+
 	return &patchOperation{Op: "replace", Path: "/spec/volumes", Value: desired}
+}
+
+// csiSecretVolume references the namespace's SecretProviderClass - the
+// kubelet performs the actual mount via the CSI driver, not this webhook.
+func csiSecretVolume(namespace string) corev1.Volume {
+	readOnly := true
+	return corev1.Volume{
+		Name: csiVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			CSI: &corev1.CSIVolumeSource{
+				Driver:   csiDriverName,
+				ReadOnly: &readOnly,
+				VolumeAttributes: map[string]string{
+					"secretProviderClass": spcName(namespace),
+				},
+			},
+		},
+	}
 }
 
 // initContainersOp mirrors volumesOp for /spec/initContainers, which is
@@ -95,6 +126,7 @@ func initContainersOp(current []corev1.Container, namespace string, cfg *config.
 	if len(current) == 0 {
 		return &patchOperation{Op: "add", Path: "/spec/initContainers", Value: desired}
 	}
+
 	return &patchOperation{Op: "replace", Path: "/spec/initContainers", Value: desired}
 }
 
@@ -108,21 +140,43 @@ func containersOp(current []corev1.Container, namespace string, cfg *config.Conf
 	if equality.Semantic.DeepEqual(desired, current) {
 		return nil
 	}
+
 	return &patchOperation{Op: "replace", Path: "/spec/containers", Value: desired}
 }
 
-// appVolumeMountOps mounts the shared volume into every container the Pod
-// already had, so the application can read the resolved config file with no
-// manifest change beyond the opt-in annotation. Indices index into the
-// original containers slice; containersOp only appends the sidecar, so
-// existing positions stay valid.
-func appVolumeMountOps(containers []corev1.Container) []patchOperation {
+// appVolumeMountOps mounts the shared volume(s) into every container the Pod
+// already had, so the application can read the resolved config file (and,
+// when refs is non-empty, the CSI-mounted secrets) with no manifest change
+// beyond the opt-in annotation. Indices index into the original containers
+// slice; containersOp only appends the sidecar, so existing positions stay
+// valid.
+//
+// Muninn's own injected containers are skipped. On a re-invoked admission the
+// sidecar is already in this slice, and mounting the secrets volume into it
+// would both break idempotency and hand a Muninn-authored container read
+// access to the consumer's secrets, which the CSI delivery model exists to
+// avoid (see docs/adr/0012-csi-secret-delivery.md).
+func appVolumeMountOps(containers []corev1.Container, refs []SecretRef) []patchOperation {
 	var ops []patchOperation
 
-	mount := corev1.VolumeMount{Name: volumeName, MountPath: mountPath}
+	mounts := []corev1.VolumeMount{{Name: volumeName, MountPath: mountPath}}
+	if len(refs) > 0 {
+		// Name must match csiSecretVolume's Volume.Name, not the CSI
+		// driver's own name - a VolumeMount references a volume in this
+		// Pod's spec, not the driver serving it.
+		mounts = append(mounts, corev1.VolumeMount{Name: csiVolumeName, MountPath: csiMountPath, ReadOnly: true})
+	}
 
 	for i, c := range containers {
-		desired := withVolumeMount(c.VolumeMounts, mount)
+		if c.Name == sidecarContainerName || c.Name == initContainerName {
+			continue
+		}
+
+		desired := c.VolumeMounts
+		for _, m := range mounts {
+			desired = withVolumeMount(desired, m)
+		}
+
 		if equality.Semantic.DeepEqual(desired, c.VolumeMounts) {
 			continue
 		}
@@ -198,9 +252,21 @@ func buildResolveContainer(name, namespace string, cfg *config.Config, watch boo
 		"--out", filepath.Join(mountPath, configFileName),
 	}
 
+	var env []corev1.EnvVar
 	if watch {
 		args = append(args, "--watch", "--interval", sidecarWatchInterval)
+		// Only the sidecar needs to self-identify: drift detection uses
+		// these to attribute a best-effort Event to this Pod. The
+		// one-shot init container never runs the drift-detection path.
+		env = []corev1.EnvVar{
+			{Name: "POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
+			{Name: "POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
+		}
 	}
+
+	allowPrivilegeEscalation := false
+	readOnlyRootFilesystem := true
+	runAsNonRoot := true
 
 	return corev1.Container{
 		Name: name,
@@ -209,8 +275,33 @@ func buildResolveContainer(name, namespace string, cfg *config.Config, watch boo
 		Image:           cfg.InjectImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Args:            args,
+		Env:             env,
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: volumeName, MountPath: mountPath},
+		},
+		// A namespace with a ResourceQuota on cpu or memory rejects any Pod
+		// whose containers omit requests and limits, which would make merely
+		// annotating a Pod there un-creatable.
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("16Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("100m"),
+				corev1.ResourceMemory: resource.MustParse("64Mi"),
+			},
+		},
+		// Set explicitly rather than inherited: a consumer Pod under the
+		// restricted Pod Security standard rejects containers that leave these
+		// unset, and these containers are added without the consumer's
+		// knowledge.
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
+			RunAsNonRoot:             &runAsNonRoot,
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
 	}
 }

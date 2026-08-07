@@ -24,7 +24,10 @@ import (
 	"go.uber.org/fx/fxtest"
 	"go.uber.org/zap"
 	admissionv1 "k8s.io/api/admission/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/garoze/muninn/internal/app"
 	"github.com/garoze/muninn/internal/config"
 	"github.com/garoze/muninn/internal/observability"
 )
@@ -48,7 +51,20 @@ func TestModule_StartsAndServesRealHTTPS(t *testing.T) {
 		fx.Provide(zap.NewNop),
 		fx.Provide(sdktrace.NewTracerProvider),
 		fx.Provide(func() *observability.Metrics { return observability.NewMetrics(prometheus.NewRegistry()) }),
-		Module,
+		fx.Provide(func() *app.DiscoveryService {
+			svc := app.NewDiscoveryService(cfg, zap.NewNop(), nil)
+			svc.Cache.SetSynced()
+			return svc
+		}),
+		// Module's own NewClient dials a real cluster (needs *rest.Config /
+		// *runtime.Scheme this test has no reason to fake convincingly) -
+		// this test is about the HTTP/TLS server, not cluster connectivity,
+		// so it takes Module's other provides directly and substitutes a
+		// fake client instead of pulling NewClient in.
+		fx.Provide(NewHandler),
+		fx.Provide(NewServer),
+		fx.Provide(func() client.Client { return fake.NewClientBuilder().WithScheme(testSPCScheme(t)).Build() }),
+		fx.Invoke(startWebhookServer),
 	)
 	fxApp.RequireStart()
 	defer fxApp.RequireStop()
@@ -80,6 +96,15 @@ func TestModule_StartsAndServesRealHTTPS(t *testing.T) {
 	}
 	if review.Response == nil || !review.Response.Allowed || string(review.Response.UID) != "test-uid" {
 		t.Errorf("got %+v", review.Response)
+	}
+}
+
+func TestValidateInjectConfig(t *testing.T) {
+	if err := validateInjectConfig(&config.Config{}); err == nil {
+		t.Error("expected an error for an empty InjectImage: annotated Pods would be rejected for an empty container image")
+	}
+	if err := validateInjectConfig(&config.Config{InjectImage: "localhost/muninn:latest"}); err != nil {
+		t.Errorf("expected no error once an image is set, got %v", err)
 	}
 }
 

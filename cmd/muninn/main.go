@@ -12,6 +12,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
+	health "google.golang.org/grpc/health"
 
 	appModule "github.com/garoze/muninn/internal/app"
 	"github.com/garoze/muninn/internal/config"
@@ -58,6 +59,12 @@ func startServe() (*fx.App, error) {
 // startWebhook wires the mutating admission webhook HTTP server. Constructors
 // are called directly instead of the full observability.Module, which also
 // brings pieces webhook mode doesn't need.
+//
+// appModule.Module and kubeModule.Module give the webhook its own
+// informer/cache, separate from server's - the webhook resolves config
+// in-process rather than dialing server's gRPC API, so admission latency and
+// availability never depend on server being reachable. grpcTransport.Module
+// is deliberately not included: webhook mode runs no gRPC server of its own.
 func startWebhook() (*fx.App, error) {
 	app := fx.New(
 		fx.Provide(config.New),
@@ -67,6 +74,13 @@ func startWebhook() (*fx.App, error) {
 		fx.Provide(func() prometheus.Registerer { return prometheus.DefaultRegisterer }),
 		fx.Provide(observability.NewMetrics),
 		fx.Invoke(observability.StartMetricsServer),
+		// kube.Watcher's health-server params exist to gate serve's gRPC
+		// readiness; webhook mode has no gRPC server to gate, so both are nil
+		// - MarkHealthServing already nil-checks each independently.
+		fx.Provide(func() *health.Server { return nil }),
+		fx.Provide(func() *observability.StandaloneHealth { return nil }),
+		appModule.Module,
+		kubeModule.Module,
 		webhookModule.Module,
 	)
 
