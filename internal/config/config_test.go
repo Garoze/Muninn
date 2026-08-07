@@ -6,7 +6,10 @@ import (
 )
 
 func TestNew_Defaults(t *testing.T) {
-	cfg := New()
+	cfg, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	cases := map[string]struct {
 		got  any
@@ -24,6 +27,17 @@ func TestNew_Defaults(t *testing.T) {
 		"SelfAddr":               {cfg.SelfAddr, "muninn.muninn-system.svc.cluster.local:5010"},
 		"GRPCTLSCertPath":        {cfg.GRPCTLSCertPath, ""},
 		"GRPCTLSKeyPath":         {cfg.GRPCTLSKeyPath, ""},
+		"SecretSPCMode":          {cfg.SecretSPCMode, SecretSPCModeCreate},
+		"VaultAddress":           {cfg.VaultAddress, "http://vault.kube-system:8200"},
+		"VaultRoleName":          {cfg.VaultRoleName, "muninn"},
+		"WebhookAddr":            {cfg.WebhookAddr, ":8443"},
+		// Where cert-manager's Certificate lands per config/webhook/.
+		"WebhookTLSCertPath": {cfg.WebhookTLSCertPath, "/etc/webhook/certs/tls.crt"},
+		"WebhookTLSKeyPath":  {cfg.WebhookTLSKeyPath, "/etc/webhook/certs/tls.key"},
+		// No default is possible: it has to match the webhook's own Deployment
+		// image, which the process cannot read for itself. Webhook mode
+		// rejects an empty value at startup instead of guessing.
+		"InjectImage": {cfg.InjectImage, ""},
 	}
 
 	for name, tc := range cases {
@@ -53,8 +67,14 @@ func TestNew_EnvOverrides(t *testing.T) {
 	t.Setenv("ENABLED_CONFIG_SOURCES", "ConfigMap, CustomSource")
 	t.Setenv("GRPC_TLS_CERT_PATH", "/etc/muninn/grpc-tls/tls.crt")
 	t.Setenv("GRPC_TLS_KEY_PATH", "/etc/muninn/grpc-tls/tls.key")
+	t.Setenv("SECRET_SPC_MODE", "Reference")
+	t.Setenv("VAULT_ADDRESS", "http://vault.other-ns.svc.cluster.local:8200")
+	t.Setenv("VAULT_ROLE_NAME", "other-role")
 
-	cfg := New()
+	cfg, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	if cfg.GrpcServiceAddr != ":9999" {
 		t.Errorf("GrpcServiceAddr: got %q", cfg.GrpcServiceAddr)
@@ -95,6 +115,51 @@ func TestNew_EnvOverrides(t *testing.T) {
 	}
 	if cfg.GRPCTLSKeyPath != "/etc/muninn/grpc-tls/tls.key" {
 		t.Errorf("GRPCTLSKeyPath: got %q", cfg.GRPCTLSKeyPath)
+	}
+	if cfg.SecretSPCMode != SecretSPCModeReference {
+		t.Errorf("SecretSPCMode: got %q, want %q", cfg.SecretSPCMode, SecretSPCModeReference)
+	}
+	if cfg.VaultAddress != "http://vault.other-ns.svc.cluster.local:8200" {
+		t.Errorf("VaultAddress: got %q", cfg.VaultAddress)
+	}
+	if cfg.VaultRoleName != "other-role" {
+		t.Errorf("VaultRoleName: got %q", cfg.VaultRoleName)
+	}
+}
+
+// TestNew_SecretSPCMode_CaseInsensitiveNormalization: a typo here silently
+// granting the more privileged Create mode instead of the requested
+// Reference mode would be a security-relevant misconfiguration with no
+// visible symptom, so SECRET_SPC_MODE is normalized case-insensitively to
+// the canonical constant rather than compared/stored verbatim.
+func TestNew_SecretSPCMode_CaseInsensitiveNormalization(t *testing.T) {
+	cases := map[string]SecretSPCMode{
+		"reference": SecretSPCModeReference,
+		"REFERENCE": SecretSPCModeReference,
+		"Reference": SecretSPCModeReference,
+		"create":    SecretSPCModeCreate,
+		"CREATE":    SecretSPCModeCreate,
+		"Create":    SecretSPCModeCreate,
+	}
+	for in, want := range cases {
+		t.Run(in, func(t *testing.T) {
+			t.Setenv("SECRET_SPC_MODE", in)
+			cfg, err := New()
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if cfg.SecretSPCMode != want {
+				t.Errorf("SecretSPCMode: got %q, want canonical %q", cfg.SecretSPCMode, want)
+			}
+		})
+	}
+}
+
+func TestNew_SecretSPCMode_InvalidValue_Errors(t *testing.T) {
+	t.Setenv("SECRET_SPC_MODE", "referance") // realistic typo, not a random string
+	_, err := New()
+	if err == nil {
+		t.Fatal("expected an error for an invalid SECRET_SPC_MODE, got nil")
 	}
 }
 

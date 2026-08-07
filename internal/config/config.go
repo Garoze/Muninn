@@ -1,10 +1,20 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+)
+
+// SecretSPCMode names the SecretProviderClass ownership model - see
+// internal/webhook/secretproviderclass.go
+type SecretSPCMode string
+
+const (
+	SecretSPCModeCreate    SecretSPCMode = "Create"
+	SecretSPCModeReference SecretSPCMode = "Reference"
 )
 
 // Config holds process-level configuration for Muninn.
@@ -23,7 +33,7 @@ type Config struct {
 	OTELExporterEndpoint string
 
 	// TraceSampleRatio is the probability (0.0-1.0) that the new root span is sampled.
-	// Uses ParentBased wrapping so inbound sampled traces are alwys honored.
+	// Uses ParentBased wrapping so inbound sampled traces are always honored.
 	TraceSampleRatio float64
 
 	// KubeConfigPath is an optional path to a kubeconfig file.
@@ -75,11 +85,24 @@ type Config struct {
 	// by name. Empty (the default) enables every registered source; it can
 	// only narrow, not add sources not registered in code.
 	EnabledConfigSources []string
+
+	// SecretSPCMode selects whether the webhook creates/updates the
+	// namespace's SecretProviderClass (Create) or expects one
+	// pre-provisioned and only validates it (Reference).
+	SecretSPCMode SecretSPCMode
+
+	// VaultAddress is the in-cluster address of the Vault instance the
+	// generated SecretProviderClass points at.
+	VaultAddress string
+
+	// VaultRoleName is the Vault kubernetes-auth role bound to the CSI
+	// driver's ServiceAccount.
+	VaultRoleName string
 }
 
-// New returns a Config populated from enviroment variables.
-func New() *Config {
-	return &Config{
+// New returns a Config populated from environment variables.
+func New() (*Config, error) {
+	cfg := &Config{
 		GrpcServiceAddr:        envOrDefault("GRPC_SERVICE_ADDR", ":5010"),
 		GrpcProbeAddr:          envOrDefault("GRPC_PROBE_ADDR", ":5011"),
 		MetricsAddr:            envOrDefault("METRICS_ADDR", ":9090"),
@@ -97,6 +120,34 @@ func New() *Config {
 		GRPCTLSCertPath:        os.Getenv("GRPC_TLS_CERT_PATH"),
 		GRPCTLSKeyPath:         os.Getenv("GRPC_TLS_KEY_PATH"),
 		EnabledConfigSources:   envCSV("ENABLED_CONFIG_SOURCES"),
+		SecretSPCMode:          SecretSPCMode(envOrDefault("SECRET_SPC_MODE", string(SecretSPCModeCreate))),
+		VaultAddress:           envOrDefault("VAULT_ADDRESS", "http://vault.kube-system:8200"),
+		VaultRoleName:          envOrDefault("VAULT_ROLE_NAME", "muninn"),
+	}
+
+	mode, err := normalizeSecretSPCMode(cfg.SecretSPCMode)
+	if err != nil {
+		return nil, err
+	}
+	cfg.SecretSPCMode = mode
+
+	return cfg, nil
+}
+
+// normalizeSecretSPCMode validates SECRET_SPC_MODE case-insensitively and
+// returns the canonical constant, so every later exact-string comparison
+// (ReconcileSecretProviderClass) never has to account for casing. A typo
+// here silently granting the more privileged Create mode instead of the
+// requested Reference mode would be a security-relevant misconfiguration
+// with no visible symptom - fail fast at startup instead.
+func normalizeSecretSPCMode(mode SecretSPCMode) (SecretSPCMode, error) {
+	switch {
+	case strings.EqualFold(string(mode), string(SecretSPCModeCreate)):
+		return SecretSPCModeCreate, nil
+	case strings.EqualFold(string(mode), string(SecretSPCModeReference)):
+		return SecretSPCModeReference, nil
+	default:
+		return "", fmt.Errorf("invalid SECRET_SPC_MODE %q: must be %q or %q", mode, SecretSPCModeCreate, SecretSPCModeReference)
 	}
 }
 

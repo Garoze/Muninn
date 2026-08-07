@@ -41,7 +41,10 @@ func startServe() (*fx.App, error) {
 		}),
 	)
 
-	cfg := config.New()
+	cfg, err := config.New()
+	if err != nil {
+		return nil, err
+	}
 	startCtx, cancel := context.WithTimeout(context.Background(), cfg.StartupTimeout)
 	defer cancel()
 
@@ -67,7 +70,10 @@ func startWebhook() (*fx.App, error) {
 		webhookModule.Module,
 	)
 
-	cfg := config.New()
+	cfg, err := config.New()
+	if err != nil {
+		return nil, err
+	}
 	startCtx, cancel := context.WithTimeout(context.Background(), cfg.StartupTimeout)
 	defer cancel()
 
