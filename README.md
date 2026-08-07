@@ -211,44 +211,47 @@ back down.
 
 ### Delivering secrets
 
-A secret is never written into a ConfigMap by value, only by *reference*.
-Three keys share a common prefix:
+Muninn never carries a secret value. A ConfigMap holds a *reference* to one,
+and the CSI driver fetches it straight into the Pod.
+
+A reference is a key ending in `_ref`. Two optional keys sharing its prefix
+refine it:
 
 ```yaml
 data:
-  db_password_ref:  "vault://secret/data/arasaka/db-password"
-  db_password_key:  "value"
-  db_password_file: "/mnt/secrets-store/db_password"
+  db_password_ref:  "vault://secret/data/arasaka/db-password"  # required
+  db_password_key:  "value"                                    # optional
+  db_password_file: "/mnt/secrets-store/db_password"           # optional
 ```
 
-`*_ref` is the only key Muninn acts on. At admission the webhook scans
-resolved config for that suffix and derives a `SecretProviderClass`, one per
-namespace, naming what the CSI driver should fetch. It never reads or caches
-the value itself.
+- **`_ref`** names where the secret lives. At admission the webhook derives a
+  `SecretProviderClass` from every `_ref` in the namespace, describing what the
+  driver should fetch. It never reads the value itself.
+- **`_key`** picks one field out of the secret at that path. Without it the
+  mounted file holds the whole response as JSON.
+- **`_file`** records where the value will land, for your own reference only.
+  Muninn does not read it. The real path is always `/mnt/secrets-store/`
+  followed by the `_ref` key with `_ref` stripped.
 
-`*_key` picks a single field out of the secret at that path; omit it and the
-mounted file holds the whole response as JSON. `*_file` is documentation for
-your own benefit, not something Muninn interprets: the real filename is always
-the `*_ref` key with `_ref` stripped, under `/mnt/secrets-store/`.
-
-A Pod opts in with the same `muninn.io/inject: "true"` annotation, plus one
-thing plain config does not need: its own `ServiceAccount` must be able to
-authenticate to the secret store. From there it reads a file:
+A Pod opts in with the same `muninn.io/inject: "true"` annotation. It also
+needs its `ServiceAccount` bound to a role in the secret store, set up once per
+namespace rather than once per secret. The application then reads files:
 
 ```bash
-cat /etc/muninn/config.yaml
-cat /mnt/secrets-store/db_password
+cat /etc/muninn/config.yaml         # config, as before
+cat /mnt/secrets-store/db_password  # the secret value
 ```
 
-A reference added after a Pod is running cannot be mounted retroactively,
-because the CSI mount is immutable for the Pod's lifetime. The sidecar logs it
-and best-effort emits an `Event`; picking it up needs a restart, which is an
-operator's call. `make sample-events` grants the RBAC that `Event` needs.
+> [!NOTE]
+> A CSI mount is fixed for the Pod's lifetime, so a reference added to a
+> running Pod's ConfigMap cannot be applied retroactively. The sidecar logs it
+> and emits an `Event` where RBAC allows (`make sample-events`); acting on it
+> means restarting the Pod.
 
-[ADR-0012](docs/adr/0012-csi-secret-delivery.md) explains why secrets flow
-through the CSI driver and never through Muninn's own process, with a
-trust-boundary diagram. `SECRET_SPC_MODE` and the Vault settings are in
-[`docs/configuration.md`](docs/configuration.md).
+[ADR-0012](docs/adr/0012-csi-secret-delivery.md) covers why secrets flow
+through the driver and never through Muninn, with a trust-boundary diagram.
+`SECRET_SPC_MODE` decides whether the webhook creates that
+`SecretProviderClass` or only validates one you pre-provision.
 
 ## Configuration
 
