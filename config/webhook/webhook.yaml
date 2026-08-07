@@ -17,6 +17,20 @@ webhooks:
         apiVersions: ["v1"]
         operations: ["CREATE"]
         resources: ["pods"]
+    # failurePolicy: Fail blocks Pod creation wherever this webhook applies, so
+    # it must not apply to the namespaces needed to recover from the webhook
+    # being down: its own, and the control-plane components in kube-system.
+    # Without this exclusion an unavailable webhook cannot be redeployed,
+    # because its replacement Pod is itself blocked.
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["kube-system", "muninn-system"]
     failurePolicy: Fail
-    sideEffects: None
+    # In Create mode the webhook creates or updates a SecretProviderClass for
+    # namespaces whose config carries secret references, which is a side effect
+    # outside the admission response. It suppresses that write when the request
+    # is a dry run, which is exactly what NoneOnDryRun promises the API server.
+    sideEffects: NoneOnDryRun
     admissionReviewVersions: ["v1"]

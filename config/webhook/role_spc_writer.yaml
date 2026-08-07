@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: muninn-webhook-spc-writer
+rules:
+  - apiGroups: ["secrets-store.csi.x-k8s.io"]
+    resources: ["secretproviderclasses"]
+    # Server-Side Apply (ReconcileSecretProviderClass's client.Patch(...,
+    # client.Apply, ...) call) is authorized via "patch", not "update" -
+    # RBAC treats SSA as a PATCH request regardless of whether the object
+    # already exists. "create" is still needed for the first-ever apply to
+    # a namespace with no existing SecretProviderClass.
+    verbs: ["create", "patch"]

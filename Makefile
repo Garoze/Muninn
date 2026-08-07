@@ -7,7 +7,6 @@ RBAC_DIR    := config/rbac
 WEBHOOK_DIR := config/webhook
 PROTO_DIR   := proto
 PROTO_SRC   := $(PROTO_DIR)/v1
-GEN_DIR     := gen
 
 PROTOC          ?= protoc
 IMG             ?= muninn:latest
@@ -20,9 +19,9 @@ KEYS      ?=
 MANAGER_BIN ?= muninn
 QUERY_BIN   ?= muninnctl
 
-.PHONY: test test-unit test-integration test-e2e build image load lint \
-	fmt vet tidy proto sample run query describe deploy undeploy \
-	deploy-webhook undeploy-webhook clean
+.PHONY: test test-unit test-integration test-e2e test-e2e-csi build image \
+	load lint fmt vet tidy proto sample sample-events run query describe \
+	deploy undeploy deploy-webhook undeploy-webhook clean
 
 # regenerate Go code (message types + gRPC stubs) from proto/v1/*.proto
 # requires: protoc, protoc-gen-go, protoc-gen-go-grpc on $PATH
@@ -71,8 +70,11 @@ test-unit:
 
 # exercises envtest (a local, throwaway control plane); requires KUBEBUILDER_ASSETS
 # (see https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest and `setup-envtest`)
+# ./cmd/muninn/... is included alongside ./test/integration/envtest/... since
+# some envtest-gated tests live there instead - they exercise unexported
+# package-main internals no external test package can import.
 test-integration:
-	MUNINN_IT_ENVTEST=1 go test ./test/... -run TestWatcherProjection -v -count=1
+	MUNINN_IT_ENVTEST=1 go test ./test/integration/envtest/... ./cmd/muninn/... -v -count=1
 
 # deploys against your real cluster via `make deploy`/`undeploy` and exercises
 # it over a port-forward. Requires the image already built and loaded
@@ -80,6 +82,13 @@ test-integration:
 # interactive sudo). Not part of `make test` or CI — see docs/design.md.
 test-e2e:
 	MUNINN_IT_E2E=1 go test ./test/e2e/... -run TestE2E -v -timeout 8m -count=1
+
+# provisions its own disposable kind cluster and tears it down after -
+# unlike test-e2e, needs no existing cluster or pre-loaded image, but does
+# need kind/podman/helm/kubectl on PATH. Heavier (several minutes); not
+# part of `make test` or CI.
+test-e2e-csi:
+	MUNINN_IT_CSI_E2E=1 go test ./test/e2e/... -run TestCSIE2E -v -timeout 15m -count=1
 
 # override the detected engine with: make image CONTAINER_ENGINE=docker
 image:
@@ -97,6 +106,15 @@ load:
 sample:
 	kubectl apply -f $(SAMPLES_DIR)/namespace.yaml
 	kubectl apply -f $(SAMPLES_DIR)/configmap.yaml
+
+# apply the sample Role/RoleBinding granting the arasaka namespace's default
+# ServiceAccount events.k8s.io create - separate from `sample` above since
+# it's specific to CSI secret-drift Event visibility, not the core resolver
+# `sample` demonstrates. Requires `make sample` (or an equivalent arasaka
+# namespace) already applied.
+sample-events:
+	kubectl apply -f $(SAMPLES_DIR)/event_writer_role.yaml
+	kubectl apply -f $(SAMPLES_DIR)/event_writer_role_binding.yaml
 
 # run the server locally against the cluster in $KUBECONFIG
 run:
@@ -142,13 +160,25 @@ undeploy:
 # and `make deploy` already applied (needs the muninn-system namespace and
 # the gRPC Service the injected init container/sidecar dial). Applied in
 # dependency order: Issuer/Certificate first so cert-manager has time to
-# issue the Secret the Deployment mounts, then the ServiceAccount/Service/
-# Deployment, then the MutatingWebhookConfiguration last so the API server
-# doesn't start routing admission requests before the backend exists.
+# issue the Secret the Deployment mounts, then ServiceAccount/RBAC, then
+# Service/Deployment, then the MutatingWebhookConfiguration last so the API
+# server doesn't start routing admission requests before the backend exists.
+#
+# role_spc_writer(_binding).yaml grants create and patch on SecretProviderClass,
+# needed only for SECRET_SPC_MODE=Create (this repo's own reference
+# deployment default - see deployment.yaml). A Reference-mode deployment in
+# an environment that doesn't want the webhook able to create resources in
+# consumer namespaces should drop those two `kubectl apply` lines - role.yaml
+# alone (get/list/watch configmaps, get secretproviderclasses) is sufficient
+# for that mode.
 deploy-webhook:
 	kubectl apply -f $(WEBHOOK_DIR)/issuer.yaml
 	kubectl apply -f $(WEBHOOK_DIR)/certificate.yaml
 	kubectl apply -f $(WEBHOOK_DIR)/service_account.yaml
+	kubectl apply -f $(WEBHOOK_DIR)/role.yaml
+	kubectl apply -f $(WEBHOOK_DIR)/role_binding.yaml
+	kubectl apply -f $(WEBHOOK_DIR)/role_spc_writer.yaml
+	kubectl apply -f $(WEBHOOK_DIR)/role_spc_writer_binding.yaml
 	kubectl apply -f $(WEBHOOK_DIR)/service.yaml
 	kubectl apply -f $(WEBHOOK_DIR)/deployment.yaml
 	kubectl apply -f $(WEBHOOK_DIR)/webhook.yaml
@@ -160,6 +190,10 @@ undeploy-webhook:
 	kubectl delete -f $(WEBHOOK_DIR)/webhook.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/deployment.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/service.yaml --ignore-not-found
+	kubectl delete -f $(WEBHOOK_DIR)/role_spc_writer_binding.yaml --ignore-not-found
+	kubectl delete -f $(WEBHOOK_DIR)/role_spc_writer.yaml --ignore-not-found
+	kubectl delete -f $(WEBHOOK_DIR)/role_binding.yaml --ignore-not-found
+	kubectl delete -f $(WEBHOOK_DIR)/role.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/service_account.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/certificate.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/issuer.yaml --ignore-not-found

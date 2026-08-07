@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: event-writer
+  namespace: arasaka
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: event-writer
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: arasaka
