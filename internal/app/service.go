@@ -101,6 +101,25 @@ func (c *Cache) Delete(namespace string) {
 	delete(c.byNamespace, namespace)
 }
 
+// Apply mutates a namespace's entry under a single write lock. mutate receives
+// the current entry (nil when absent) and returns the entry to store, or nil to
+// delete it. Separate Get and Set calls would let two sources' concurrent
+// read-modify-write interleave and drop one source's contribution entirely.
+//
+// mutate must not call back into Cache: the write lock is held for its
+// duration and sync.RWMutex is not reentrant.
+func (c *Cache) Apply(namespace string, mutate func(current *ConfigEntry) *ConfigEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	next := mutate(c.byNamespace[namespace])
+	if next == nil {
+		delete(c.byNamespace, namespace)
+		return
+	}
+	c.byNamespace[namespace] = next
+}
+
 // Len returns the number of cached namespaces.
 func (c *Cache) Len() int {
 	c.mu.RLock()
@@ -161,11 +180,11 @@ func (s *DiscoveryService) Describe() []ConfigSourceDescriptor {
 //   - strict + missing key	-> ErrStrictMissingKeys (InvalidArgument)
 func (s *DiscoveryService) Query(ctx context.Context, namespace string, keys []string, strict bool) ([]QueryResult, []string, string, error) {
 	if !s.Cache.IsSynced() {
-		return nil, nil, "", fmt.Errorf("%w", ErrCacheNotSynced)
+		return nil, nil, "", ErrCacheNotSynced
 	}
 
 	if namespace == "" {
-		return nil, nil, "", fmt.Errorf("%w", ErrNamespaceRequired)
+		return nil, nil, "", ErrNamespaceRequired
 	}
 
 	entry := s.Cache.Get(namespace)
@@ -212,11 +231,11 @@ func (s *DiscoveryService) Query(ctx context.Context, namespace string, keys []s
 // nothing to be missing.
 func (s *DiscoveryService) Resolve(ctx context.Context, namespace string) ([]QueryResult, string, error) {
 	if !s.Cache.IsSynced() {
-		return nil, "", fmt.Errorf("%w", ErrCacheNotSynced)
+		return nil, "", ErrCacheNotSynced
 	}
 
 	if namespace == "" {
-		return nil, "", fmt.Errorf("%w", ErrNamespaceRequired)
+		return nil, "", ErrNamespaceRequired
 	}
 
 	entry := s.Cache.Get(namespace)

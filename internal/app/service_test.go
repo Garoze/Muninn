@@ -74,6 +74,50 @@ func TestCache_DeleteNonExistentNoop(t *testing.T) {
 	}
 }
 
+func TestCache_ApplyCreatesWhenAbsent(t *testing.T) {
+	c := NewCache()
+
+	var sawCurrent *ConfigEntry
+	c.Apply("ns1", func(current *ConfigEntry) *ConfigEntry {
+		sawCurrent = current
+		return &ConfigEntry{Namespace: "ns1", Sources: map[string]map[string]any{"cm1": {"KEY": "value"}}}
+	})
+
+	if sawCurrent != nil {
+		t.Errorf("mutate should see nil for an absent namespace, got %+v", sawCurrent)
+	}
+	if got := c.Get("ns1"); got == nil || got.Sources["cm1"]["KEY"] != "value" {
+		t.Errorf("got %+v, want the entry mutate returned", got)
+	}
+}
+
+func TestCache_ApplySeesCurrentEntry(t *testing.T) {
+	c := NewCache()
+	c.Set(&ConfigEntry{Namespace: "ns1", Sources: map[string]map[string]any{"cm1": {"KEY": "first"}}})
+
+	c.Apply("ns1", func(current *ConfigEntry) *ConfigEntry {
+		if current == nil || current.Sources["cm1"]["KEY"] != "first" {
+			t.Fatalf("mutate should see the stored entry, got %+v", current)
+		}
+		return &ConfigEntry{Namespace: "ns1", Sources: map[string]map[string]any{"cm1": {"KEY": "second"}}}
+	})
+
+	if got := c.Get("ns1"); got.Sources["cm1"]["KEY"] != "second" {
+		t.Errorf("got %+v, want the replacement entry", got)
+	}
+}
+
+func TestCache_ApplyNilResultDeletes(t *testing.T) {
+	c := NewCache()
+	c.Set(&ConfigEntry{Namespace: "ns1"})
+
+	c.Apply("ns1", func(*ConfigEntry) *ConfigEntry { return nil })
+
+	if got := c.Get("ns1"); got != nil {
+		t.Errorf("got %+v, want nil after mutate returned nil", got)
+	}
+}
+
 func TestCache_Len(t *testing.T) {
 	c := NewCache()
 	if c.Len() != 0 {
@@ -337,5 +381,156 @@ func TestQuery_ResolvesAcrossMultipleSources(t *testing.T) {
 	}
 	if bySource["LOG_LEVEL"] != "cm-a" || bySource["FEATURE_FLAG"] != "cm-b" {
 		t.Errorf("got %+v", bySource)
+	}
+}
+
+// --- DiscoveryService.Resolve ---
+//
+// Resolve deliberately duplicates Query's cache-lookup precedence rather than
+// sharing a helper (see docs/adr/0011-resolve-rpc.md). The duplicate needs its
+// own coverage: it is what the admission webhook and the injected containers
+// read, so an inverted precedence here would reach every consumer's config file
+// while every Query test stayed green.
+
+func TestResolve_ReturnsEveryKeyWithoutEnumeratingThem(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cache.SetSynced()
+	svc.Cache.Set(&ConfigEntry{
+		Namespace: "ns1",
+		Sources:   map[string]map[string]any{"cm-a": {"LOG_LEVEL": "info", "TIMEOUT": "30s"}},
+		Revision:  "7",
+	})
+
+	results, revision, err := svc.Resolve(context.Background(), "ns1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want every key in the namespace: %+v", len(results), results)
+	}
+	if revision != "7" {
+		t.Errorf("revision: got %q, want %q", revision, "7")
+	}
+}
+
+func TestResolve_MergesAcrossSourcesAndAttributesEach(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cache.SetSynced()
+	svc.Cache.Set(&ConfigEntry{
+		Namespace: "ns1",
+		Sources: map[string]map[string]any{
+			"cm-a": {"LOG_LEVEL": "info"},
+			"cm-b": {"FEATURE_FLAG": "true"},
+		},
+	})
+
+	results, _, err := svc.Resolve(context.Background(), "ns1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	bySource := map[string]string{}
+	for _, r := range results {
+		bySource[r.Key] = r.Source
+	}
+	if bySource["LOG_LEVEL"] != "cm-a" || bySource["FEATURE_FLAG"] != "cm-b" {
+		t.Errorf("each key must be attributed to the source that contributed it, got %+v", bySource)
+	}
+}
+
+// The precedence has to match Merged and Query: on a key collision the
+// alphabetically later source name wins.
+func TestResolve_CollisionLaterSourceWins(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cache.SetSynced()
+	svc.Cache.Set(&ConfigEntry{
+		Namespace: "ns1",
+		Sources: map[string]map[string]any{
+			"cm-a": {"LOG_LEVEL": "info"},
+			"cm-b": {"LOG_LEVEL": "debug"},
+		},
+	})
+
+	results, _, err := svc.Resolve(context.Background(), "ns1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("a colliding key must appear once, got %+v", results)
+	}
+	if results[0].Value != "debug" || results[0].Source != "cm-b" {
+		t.Errorf("got %+v, want cm-b's debug (alphabetically later source wins)", results[0])
+	}
+
+	entry := svc.Cache.Get("ns1")
+	if got := entry.Merged()["LOG_LEVEL"]; got != results[0].Value {
+		t.Errorf("Resolve disagrees with Merged on precedence: %v vs %v", results[0].Value, got)
+	}
+}
+
+func TestResolve_ResultsSortedByKey(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cache.SetSynced()
+	svc.Cache.Set(&ConfigEntry{
+		Namespace: "ns1",
+		Sources: map[string]map[string]any{
+			"cm-a": {"ZEBRA": "1", "ALPHA": "2"},
+			"cm-b": {"MIDDLE": "3"},
+		},
+	})
+
+	results, _, err := svc.Resolve(context.Background(), "ns1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var keys []string
+	for _, r := range results {
+		keys = append(keys, r.Key)
+	}
+	want := []string{"ALPHA", "MIDDLE", "ZEBRA"}
+	for i := range want {
+		if keys[i] != want[i] {
+			t.Fatalf("results must be sorted by key: got %v, want %v", keys, want)
+		}
+	}
+}
+
+func TestResolve_CacheNotSynced(t *testing.T) {
+	svc := newTestService(t)
+	if _, _, err := svc.Resolve(context.Background(), "ns1"); !errors.Is(err, ErrCacheNotSynced) {
+		t.Errorf("got %v, want ErrCacheNotSynced", err)
+	}
+}
+
+func TestResolve_NamespaceRequired(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cache.SetSynced()
+	if _, _, err := svc.Resolve(context.Background(), ""); !errors.Is(err, ErrNamespaceRequired) {
+		t.Errorf("got %v, want ErrNamespaceRequired", err)
+	}
+}
+
+func TestResolve_NamespaceNotFound(t *testing.T) {
+	svc := newTestService(t)
+	svc.Cache.SetSynced()
+	if _, _, err := svc.Resolve(context.Background(), "missing"); !errors.Is(err, ErrNamespaceNotFound) {
+		t.Errorf("got %v, want ErrNamespaceNotFound", err)
+	}
+}
+
+func TestResolve_StaleCacheEntry(t *testing.T) {
+	svc := newTestService(t)
+	svc.cacheEntryTTL = time.Minute
+	svc.now = func() time.Time { return time.Now().Add(2 * time.Minute) }
+	svc.Cache.SetSynced()
+	svc.Cache.Set(&ConfigEntry{
+		Namespace: "ns1",
+		Sources:   map[string]map[string]any{"cm-a": {"LOG_LEVEL": "info"}},
+		UpdatedAt: time.Now(),
+	})
+
+	if _, _, err := svc.Resolve(context.Background(), "ns1"); !errors.Is(err, ErrCacheEntryStale) {
+		t.Errorf("got %v, want ErrCacheEntryStale", err)
 	}
 }

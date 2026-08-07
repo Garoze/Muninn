@@ -14,7 +14,7 @@ var (
 	// ErrNamespaceRequired is returned when namespace is empty in the request.
 	ErrNamespaceRequired = errors.New("namespace is required")
 
-	// ErrStrictMissingKeys is returned in strict mode when one or mode
+	// ErrStrictMissingKeys is returned in strict mode when one or more
 	// requested keys are absent from the cache entry.
 	ErrStrictMissingKeys = errors.New("strict mode: missing keys")
 
