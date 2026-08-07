@@ -28,7 +28,8 @@ service DiscoveryService {
 
 message QueryRequest {
   string namespace = 1;     // REQUIRED. Namespace to resolve configuration for.
-  repeated string keys = 2; // REQUIRED. Keys to fetch.
+  repeated string keys = 2; // Keys to fetch. An empty list resolves nothing;
+                            // use Resolve to retrieve everything.
   bool strict = 3;          // If true, any missing key returns InvalidArgument.
 }
 

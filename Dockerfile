@@ -9,12 +9,14 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /bin/muninn ./cmd/muninn
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /bin/muninn ./cmd/muninn
 
 FROM gcr.io/distroless/static:nonroot
 
 LABEL org.opencontainers.image.source="https://github.com/Garoze/Muninn"
-LABEL org.opencontainers.image.description="Kubernetes-native multi-tenant runtime configuration discovery service"
+LABEL org.opencontainers.image.description="Kubernetes-native runtime configuration resolver"
 LABEL org.opencontainers.image.licenses="MIT"
 
 COPY --from=build /bin/muninn /muninn
