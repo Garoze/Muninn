@@ -22,17 +22,9 @@ spec:
           type: RuntimeDefault
       containers:
         - name: muninn
-          image: &muninnImage localhost/muninn:latest
+          image: localhost/muninn:latest
           imagePullPolicy: Never
           args: ["serve"]
-          env:
-            # Same value as this container's own image, above - anchored
-            # so the two can't drift out of sync. The webhook stamps this
-            # into the init container/sidecar it injects into opted-in
-            # Pods, since Kubernetes has no fieldRef for a container's own
-            # image.
-            - name: MUNINN_INJECT_IMAGE
-              value: *muninnImage
           ports:
             - name: grpc
               containerPort: 5010
