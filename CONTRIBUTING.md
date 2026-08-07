@@ -3,21 +3,38 @@
 Issues and pull requests are welcome. By participating, you agree to abide by
 the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
-The planned scope of Muninn as a portfolio project is complete, so new
-features are generally outside the project's scope. Pull requests may not be
-reviewed or merged if they fall outside that scope; for larger changes,
-forking the project may be a better approach.
+The current implementation covers the scope this project set out to
+demonstrate, so a large feature addition is worth raising in an issue before
+writing it: some are a better fit for a fork than for a change here, and
+that is easier to establish before the work than after it.
 
-Bug reports are an exception. If you are running Muninn in a real cluster,
-please report any bugs you encounter. They will be investigated on a
-best-effort basis.
+Bug reports are always welcome, particularly from anyone running Muninn
+against a real cluster, and are investigated on a best-effort basis. So are
+fixes, documentation corrections, and test coverage for behavior that already
+exists.
 
 ## Getting started
 
-Follow the [README's "Getting started"](./README.md#getting-started)
+Follow the [README's "Quick start"](./README.md#quick-start)
 section: Go 1.26+, a Kubernetes cluster, and optionally `grpcurl`. You
 should be able to `make sample` and `make run` successfully before making
 changes.
+
+## Project layout
+
+| Package | Role |
+|---|---|
+| `internal/kube` | `ConfigSource` interface and `ConfigMapSource`, informers, patch-based cache sync |
+| `internal/app` | domain layer: `Cache`, `DiscoveryService`, sentinel errors |
+| `internal/transport/grpc` | proto and domain translation, gRPC handler, server, listener, TLS |
+| `internal/webhook` | admission webhook: injection patch, secret references, `SecretProviderClass`, HTTPS server |
+| `internal/discoveryclient` | shared gRPC dial helper |
+| `internal/observability` | metrics, tracing, health |
+| `internal/config` | env-driven configuration |
+
+The domain layer imports no Kubernetes or gRPC types, and a change that
+introduces one there belongs at an edge instead. [`docs/design.md`](docs/design.md)
+covers why the boundary sits where it does.
 
 ## Making changes
 
@@ -43,7 +60,8 @@ alongside the `.proto` change.
 
 Add tests for new behavior, including negative/error cases alongside the
 happy path. See `internal/` for the existing test files for the expected
-shape and coverage level.
+shape and coverage level, and [`docs/testing.md`](docs/testing.md) for what
+each tier is responsible for proving.
 
 ## Commit messages
 
