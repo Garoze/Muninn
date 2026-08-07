@@ -118,12 +118,8 @@ make sample                        # Namespace + a labeled ConfigMap
 
 ### Run it
 
-> [!IMPORTANT]
-> `KUBE_CONFIG_PATH` is Muninn's own config variable, separate from
-> `kubectl`'s `$KUBECONFIG`. `make run`'s recipe forwards `$KUBECONFIG`
-> into `KUBE_CONFIG_PATH` for you, so set `KUBECONFIG` (not
-> `KUBE_CONFIG_PATH`) when using `make run`: only the direct `go run`
-> invocation below needs `KUBE_CONFIG_PATH` set explicitly.
+`make run` forwards `$KUBECONFIG` into Muninn's own `KUBE_CONFIG_PATH`, so
+set `KUBECONFIG` as usual; only the direct `go run` below needs the latter.
 
 ```bash
 export KUBECONFIG=~/.kube/config
@@ -136,9 +132,8 @@ or directly:
 KUBE_CONFIG_PATH=~/.kube/config go run ./cmd/muninn serve
 ```
 
-On success, structured logs report cache sync (`"informers synced and
-watching"`) and the gRPC server binding `:5010` (configurable via
-`GRPC_SERVICE_ADDR`).
+On success, Muninn logs that its informers have synced and binds the gRPC
+server on `:5010`.
 
 ### Query it
 
@@ -187,19 +182,6 @@ make query NAMESPACE=arasaka KEYS=LOG_LEVEL
 `make undeploy` tears it back down. See [`docs/design.md`](docs/design.md)
 for the RBAC and deployment rationale.
 
-### More than one namespace
-
-Muninn imposes no namespace naming convention. Any namespace holding a
-ConfigMap with the matching label is resolved the same way as the sample
-fixture, and the cache is keyed by namespace, so a second one is just the same
-ConfigMap shape somewhere else.
-
-```bash
-kubectl create namespace militech
-kubectl label configmap runtime-config -n militech muninn.io/config=runtime
-make query NAMESPACE=militech KEYS=FEATURE_DARKMODE
-```
-
 ### Delivering config as a file (the admission webhook)
 
 `make deploy` alone covers the gRPC API. The mutating admission webhook is
@@ -209,7 +191,7 @@ manifests don't install):
 
 ```bash
 make deploy-webhook     # apply config/webhook/: Issuer, Certificate,
-                         # Service, Deployment, MutatingWebhookConfiguration
+                        # Service, Deployment, MutatingWebhookConfiguration
 ```
 
 Annotate any Pod to opt in. Nothing else in its spec needs to change:
@@ -302,9 +284,8 @@ make test               # both, and what CI runs
 ```
 
 Unit tests cover the domain layer, the gRPC translation boundary, the
-watch-and-patch logic, observability wiring and configuration parsing, with
-negative and edge cases alongside the happy paths. The integration tier runs
-against a real API server.
+watch-and-patch logic, observability wiring and configuration parsing. The
+integration tier runs against a real API server via `envtest`.
 
 ### End-to-end tests
 
@@ -340,10 +321,9 @@ and that `failurePolicy: Fail` does not affect unrelated Pods.
 | `make test` / `test-unit` / `test-integration` | Run tests (both tiers run in CI)                                          |
 | `make test-e2e`                                | Deploy + exercise + tear down against a cluster you already have (not in `make test` or CI) |
 | `make test-e2e-csi`                            | Provisions its own disposable `kind` cluster and exercises the CSI secret-delivery path (not in `make test` or CI) |
-| `make lint`                                    | `golangci-lint run ./...`, same check CI runs                            |
 | `make query NAMESPACE=<ns> KEYS=<a,b,c>`       | Query keys for a namespace via `muninnctl`                                |
 | `make describe`                                | List the active configuration sources via `muninnctl`                     |
-| `make fmt` / `vet` / `lint` / `tidy`           | Standard Go hygiene                                                       |
+| `make fmt` / `vet` / `lint` / `tidy`           | Standard Go hygiene; `lint` is the check CI runs                          |
 | `make proto`                                   | Regenerate gRPC stubs from `proto/v1/discovery.proto` (requires `protoc`) |
 | `make build`                                   | Compile `cmd/` entrypoints into `bin/`                                    |
 | `make image` / `load`                          | Build the container image / import it into k3s's containerd store        |
@@ -352,13 +332,8 @@ and that `failurePolicy: Fail` does not affect unrelated Pods.
 
 ## Documentation
 
-[`docs/design.md`](docs/design.md) covers the full rationale behind every
-design decision referenced above: the pluggable source model, the
-domain/transport boundary, error translation, Fx wiring, in-cluster RBAC,
-the end-to-end test, and observability.
-
-[`docs/adr/`](docs/adr/) records the decisions with the most significant
-tradeoffs as standalone Architecture Decision Records.
+[`docs/`](docs/) covers configuration, observability, the design rationale and
+the Architecture Decision Records.
 
 ## Status
 
