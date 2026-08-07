@@ -16,17 +16,14 @@
 
 **Kubernetes-native runtime configuration resolver.**
 
-Muninn watches a pluggable set of Kubernetes objects (core `ConfigMap`,
-scoped by a label selector, is the default and only source registered
-today), projects them into an in-memory cache keyed by namespace, and
-exposes that cache over a gRPC API (`Query` for specific keys, `Resolve`
-for everything in a namespace, `Describe` for the active sources' shape).
-A mutating admission webhook offers a second, code-free integration path:
-a Pod that opts in via an annotation gets a shared volume, an init
-container, and a sidecar injected automatically, and reads its resolved
-configuration as a file instead of a gRPC client. Muninn makes no
-assumptions about what those keys mean or what platform sits underneath
-it. It resolves configuration, nothing more.
+Muninn resolves runtime configuration for workloads running in Kubernetes.
+It watches labeled ConfigMaps, keeps a merged per-namespace view in memory,
+and serves that view over gRPC.
+
+A mutating admission webhook delivers the same view into a Pod as a file, so
+a workload can consume it with no client code at all. Either way, a
+configuration change reaches a running Pod without a restart, and without
+that Pod holding a watch against the API server.
 
 ```mermaid
 flowchart LR
@@ -39,87 +36,72 @@ flowchart LR
 
 ## Motivation
 
-Most services in a Kubernetes-native platform need the same handful of
-per-namespace configuration values, and none of them should read ConfigMaps
-directly to get them: that couples every consumer to a naming convention
-and a Kubernetes client. Muninn centralizes that: one service watches
-labeled ConfigMaps, merges them into a per-namespace view, and serves that
-view over gRPC with a documented contract (`Describe`).
+A workload can read its own ConfigMap directly, and for a single workload
+that is usually the right answer. It stops scaling once many workloads need
+overlapping configuration: each one needs a Kubernetes client, its own RBAC,
+and its own watch against the API server, so read load and watch connections
+grow with the size of the fleet rather than with the amount of data.
 
-A namespace is a natural, generic scope: it composes cleanly with a
-single-namespace deployment (one ConfigMap in `default`), several
-namespaces (a ConfigMap per namespace, as in the
-[additional-namespaces example](#scoping-to-additional-namespaces-an-example)
-below), or a consumer's own custom resource, without Muninn dictating which.
+Muninn collapses that to one watcher. Informers hold the current state in
+memory, so a read costs no API server round trip and a change propagates
+within the watch layer's event latency. Consumers get a merged per-namespace
+view, either over gRPC with a documented contract (`Describe`) or as a file
+written into the Pod.
+
+Namespace is the resolution scope because it is a boundary Kubernetes already
+has. That composes with a single namespace, one namespace per tenant, or a
+consumer's own custom resource, without Muninn dictating which.
 
 ## Architecture
 
-| Package                    | Role                                                                |
-|----------------------------|----------------------------------------------------------------------|
-| `internal/kube`            | `ConfigSource` interface + `ConfigMapSource`, informers, patch-based cache sync |
-| `internal/app`             | domain layer: `Cache`, `DiscoveryService.Query/Resolve`, sentinel errors |
-| `internal/transport/grpc`  | proto ↔ domain translation, gRPC handler, gRPC server/listener/TLS  |
-| `internal/webhook`         | mutating admission webhook: Pod injection patch, secret-reference extraction, `SecretProviderClass` reconciliation, HTTPS server |
-| `internal/discoveryclient` | shared gRPC dial helper (used by `muninnctl` and `muninn resolve`)    |
-| `internal/observability`   | Prometheus metrics, tracing, health checks                          |
-| `internal/config`          | env-driven configuration                                             |
-| `gen/discovery/v1`         | generated gRPC/protobuf stubs                                        |
+| Package | Role |
+|---|---|
+| `internal/kube` | `ConfigSource` interface and `ConfigMapSource`, informers, patch-based cache sync |
+| `internal/app` | domain layer: `Cache`, `DiscoveryService`, sentinel errors |
+| `internal/transport/grpc` | proto and domain translation, gRPC handler, server, listener, TLS |
+| `internal/webhook` | admission webhook: injection patch, secret references, `SecretProviderClass`, HTTPS server |
+| `internal/discoveryclient` | shared gRPC dial helper |
+| `internal/observability` | metrics, tracing, health |
+| `internal/config` | env-driven configuration |
 
-The domain layer is decoupled from both Kubernetes and gRPC specifics.
-each edge translates in its own direction, and the domain package itself
-has no knowledge of either. See [`docs/design.md`](docs/design.md) for
-why, and how that boundary is enforced.
+The domain layer knows nothing about Kubernetes or gRPC; each edge translates
+in its own direction, and that boundary is enforced structurally rather than by
+convention.
 
-Four design principles underpin the implementation:
+Five ideas carry most of the design:
 
-- **Pluggable sources**: the watch layer, cache, and domain layer are
-  written against a `ConfigSource` interface, not against `ConfigMap`
-  specifically. A bring-your-own custom resource registers a second
-  source without changing any of the three.
-- **Patch-based cache merge**: each source object owns its own slice of
-  a namespace's cached state, so one source object's update never
-  touches another's data in the same namespace.
-- **Readiness gating**: the gRPC health check stays `NOT_SERVING`, and
-  the webhook's `/readyz` returns 503, until every registered source's
-  informer cache completes its initial list+watch cycle.
-- **No admission-time dependency on the resolver**: the webhook runs its
-  own watcher and cache and resolves in-process, so a resolver outage
-  never blocks Pod scheduling.
-- **No fixed key vocabulary**: Muninn serves whatever keys exist in the
-  resolved source data; `Describe` reports the active sources' shape
-  (kind, label selector, scope) rather than an enumerated key list, since
-  the data itself is open-ended.
+- **Pluggable sources.** The watch layer, cache and domain layer are written
+  against a `ConfigSource` interface, not against `ConfigMap`. A
+  bring-your-own custom resource registers as one more source.
+- **Patch-based merge.** Each source object owns its own slice of a namespace's
+  state, so one object's update never disturbs another's.
+- **Readiness gating.** Reads stay unavailable until every registered source's
+  informer finishes its initial list and watch.
+- **No admission-time dependency on the resolver.** The webhook runs its own
+  watcher and cache, so a resolver outage cannot block Pod scheduling.
+- **No fixed key vocabulary.** Muninn serves whatever keys the source data
+  holds; `Describe` reports the sources' shape, not an enumerated key list.
 
-See [`docs/design.md`](docs/design.md) for the rationale behind these and
-other design decisions.
+[`docs/design.md`](docs/design.md) has the reasoning behind each, and
+[`docs/adr/`](docs/adr/) records the decisions with the largest tradeoffs.
 
 ## Getting started
 
 ### Prerequisites
 
-- Go 1.26+
-- `make`
-- A running Kubernetes cluster and `kubectl` pointed at it (developed
-  against [k3s](https://k3s.io/); any cluster works)
-- [cert-manager](https://cert-manager.io/) already installed on the
-  cluster (only for `make deploy-webhook`: the gRPC resolver alone,
-  `make deploy`, doesn't need it). Muninn's own manifests issue a
-  `Certificate` through it but don't install it themselves; see
-  "Delivering config as a file" below.
-- [`secrets-store-csi-driver`](https://secrets-store-csi-driver.sigs.k8s.io/)
-  plus a supported provider (only [Vault](https://www.vaultproject.io/)
-  is implemented) already installed on the cluster: only for consumers
-  who want secrets delivered, not plain config. Muninn's webhook
-  orchestrates the driver's own objects but doesn't install the driver
-  or run a secret store itself; see "Delivering secrets" below.
-- [`grpcurl`](https://github.com/fullstorydev/grpcurl) (optional: for
-  calling the API directly instead of through `muninnctl`; the server
-  registers gRPC reflection, so no `.proto` files are needed client-side)
-- [`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest)
-  (only for `make test-integration`):
-  `go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest`, then
-  `export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)`. Downloads a
-  throwaway `etcd`/`kube-apiserver` pair; doesn't touch the real cluster.
+- Go 1.26+, `make`, and a Kubernetes cluster with `kubectl` pointed at it
+  (developed against [k3s](https://k3s.io/); any cluster works)
+
+Optional, depending on what you run:
+
+| For | You also need |
+|---|---|
+| `make deploy-webhook` | [cert-manager](https://cert-manager.io/), which issues the webhook's serving certificate |
+| Secret delivery | [`secrets-store-csi-driver`](https://secrets-store-csi-driver.sigs.k8s.io/) and [Vault](https://www.vaultproject.io/) |
+| `make test-integration` | [`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest), then `export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)` |
+| Calling the API without `muninnctl` | [`grpcurl`](https://github.com/fullstorydev/grpcurl); the server registers reflection, so no `.proto` files are needed |
+
+Muninn orchestrates cert-manager and the CSI driver but installs neither.
 
 ### Apply the sample fixtures
 
@@ -157,22 +139,6 @@ KUBE_CONFIG_PATH=~/.kube/config go run ./cmd/muninn serve
 On success, structured logs report cache sync (`"informers synced and
 watching"`) and the gRPC server binding `:5010` (configurable via
 `GRPC_SERVICE_ADDR`).
-
-### Restricting which sources run (optional)
-
-`ENABLED_CONFIG_SOURCES` narrows the registered `ConfigSource`s down to a
-named subset, by `Kind()`: unset (the default) runs everything
-registered:
-
-```bash
-# only run the ConfigMap source (today's default, made explicit)
-ENABLED_CONFIG_SOURCES=ConfigMap make run
-```
-
-`Describe` reflects the filter: it lists only sources that are both
-registered in code and named here. Naming a kind that isn't registered
-(a typo, for example) leaves nothing enabled and fails startup outright,
-rather than running with no sources watched.
 
 ### Query it
 
@@ -221,32 +187,18 @@ make query NAMESPACE=arasaka KEYS=LOG_LEVEL
 `make undeploy` tears it back down. See [`docs/design.md`](docs/design.md)
 for the RBAC and deployment rationale.
 
-### Scoping to additional namespaces (an example)
+### More than one namespace
 
-Muninn's core scope is a single label selector across namespaces, and it
-imposes no namespace naming convention: any namespace with a matching
-labeled ConfigMap works the same way as the sample fixture:
+Muninn imposes no namespace naming convention. Any namespace holding a
+ConfigMap with the matching label is resolved the same way as the sample
+fixture, and the cache is keyed by namespace, so a second one is just the same
+ConfigMap shape somewhere else.
 
 ```bash
-kubectl create namespace acme
-kubectl apply -f - <<'EOF'
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: runtime-config
-  namespace: acme
-  labels:
-    muninn.io/config: "runtime"
-data:
-  FEATURE_DARKMODE: "false"
-EOF
-
-make query NAMESPACE=acme KEYS=FEATURE_DARKMODE
+kubectl create namespace militech
+kubectl label configmap runtime-config -n militech muninn.io/config=runtime
+make query NAMESPACE=militech KEYS=FEATURE_DARKMODE
 ```
-
-A second namespace (`globex`, or anything else) is the same ConfigMap
-shape in a different namespace: Muninn's cache is keyed by namespace
-regardless of what a given deployment chooses to call it.
 
 ### Delivering config as a file (the admission webhook)
 
@@ -278,204 +230,105 @@ drift-detection rationale.
 
 ### Delivering secrets
 
-A secret is never written into a ConfigMap by value, only by
-*reference*, using three keys sharing a common prefix:
+A secret is never written into a ConfigMap by value, only by *reference*.
+Three keys share a common prefix:
 
 ```yaml
 data:
-  db_password_ref:  "vault://secret/data/arasaka/db-password"  # required: where it lives
-  db_password_key:  "value"                                     # optional: which field within it
-  db_password_file: "/mnt/secrets-store/db_password"             # for your own reference, see below
+  db_password_ref:  "vault://secret/data/arasaka/db-password"
+  db_password_key:  "value"
+  db_password_file: "/mnt/secrets-store/db_password"
 ```
 
-- **`*_ref`** is the only key Muninn acts on. At admission, the webhook
-  scans resolved config for this suffix and generates (or, in
-  `Reference` mode, validates) a `SecretProviderClass` describing what to
-  fetch. There is one per namespace, shared by every Pod in it. The
-  webhook never reads or caches the secret value itself.
-- **`*_key`** picks a single field out of the secret at that path. Omit
-  it and the mounted file contains the whole raw response as JSON
-  instead. That is a safe default, not an error.
-- **`*_file`** isn't interpreted by Muninn: it's documentation for
-  yourself. The real mounted filename is always the `*_ref` key with
-  `_ref` stripped (`db_password_ref` → `db_password`, always at the
-  fixed path `/mnt/secrets-store/`), so this value only stays true if it
-  matches that exactly.
+`*_ref` is the only key Muninn acts on. At admission the webhook scans
+resolved config for that suffix and derives a `SecretProviderClass`, one per
+namespace, naming what the CSI driver should fetch. It never reads or caches
+the value itself.
 
-A Pod picks this up the same way it picks up plain config: annotate it
-`muninn.io/inject: "true"`, plus one thing plain config doesn't need:
-its own `ServiceAccount` has to be able to authenticate to the secret
-store (a Kubernetes-auth role bound to that `ServiceAccount`/namespace,
-set up once, not per secret). From there, the application just reads a
-file:
+`*_key` picks a single field out of the secret at that path; omit it and the
+mounted file holds the whole response as JSON. `*_file` is documentation for
+your own benefit, not something Muninn interprets: the real filename is always
+the `*_ref` key with `_ref` stripped, under `/mnt/secrets-store/`.
+
+A Pod opts in with the same `muninn.io/inject: "true"` annotation, plus one
+thing plain config does not need: its own `ServiceAccount` must be able to
+authenticate to the secret store. From there it reads a file:
 
 ```bash
-cat /etc/muninn/config.yaml        # plain config, as before
-cat /mnt/secrets-store/db_password # the actual secret value
+cat /etc/muninn/config.yaml
+cat /mnt/secrets-store/db_password
 ```
 
-`SECRET_SPC_MODE` decides who owns the `SecretProviderClass`. `Create`
-(the default) has the webhook generate and keep it current, so the
-ConfigMap stays the only place you declare what a namespace needs; it
-requires the write grant in
-[`config/webhook/role_spc_writer.yaml`](config/webhook/role_spc_writer.yaml).
-`Reference` expects a platform team to pre-provision the object and gives
-the webhook read access only, rejecting admission when the object doesn't
-describe the secrets your config references. That check compares the
-secrets themselves, not the YAML text, so field order, quoting and
-indentation are free to differ, but an entry your config never
-references is rejected, since the driver would mount it anyway.
+A reference added after a Pod is running cannot be mounted retroactively,
+because the CSI mount is immutable for the Pod's lifetime. The sidecar logs it
+and best-effort emits an `Event`; picking it up needs a restart, which is an
+operator's call. `make sample-events` grants the RBAC that `Event` needs.
 
-A reference added to an already-running
-Pod's ConfigMap can't be mounted retroactively (the CSI mount is
-immutable for the Pod's lifetime): the sidecar detects it, logs it, and
-best-effort emits a `kubectl get events`-visible `Event`; picking it up
-needs a Pod restart, an operator's call to make. That Event needs one
-more RBAC grant most namespaces won't have by default:
-
-```bash
-make sample-events   # apply config/samples/event_writer_role*.yaml
-```
-
-See [ADR-0012](docs/adr/0012-csi-secret-delivery.md) for why secrets
-flow this way: through the CSI driver directly, never through Muninn's
-own process, with a trust-boundary diagram.
+[ADR-0012](docs/adr/0012-csi-secret-delivery.md) explains why secrets flow
+through the CSI driver and never through Muninn's own process, with a
+trust-boundary diagram. `SECRET_SPC_MODE` and the Vault settings are in
+[`docs/configuration.md`](docs/configuration.md).
 
 ## Configuration
 
-Every setting is an environment variable with a default, so both modes run
-unconfigured against a local cluster. `serve` and `webhook` read the same
-set; each ignores what it doesn't use.
-
-**Resolver (`muninn serve`)**
+Every setting is an environment variable with a default. The ones most
+deployments touch:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `KUBE_CONFIG_PATH` | *(unset)* | Path to a kubeconfig. Unset uses in-cluster credentials. |
 | `CONFIGMAP_LABEL_SELECTOR` | `muninn.io/config=runtime` | Scopes which ConfigMaps are watched. |
-| `ENABLED_CONFIG_SOURCES` | *(unset)* | Comma-separated `Kind` names. Unset enables every registered source; can only narrow. |
 | `GRPC_SERVICE_ADDR` | `:5010` | gRPC API bind address. |
-| `GRPC_PROBE_ADDR` | `:5011` | gRPC health probe bind address. |
-| `GRPC_TLS_CERT_PATH` | *(unset)* | Enables TLS on the gRPC API. Must be set together with the key. |
-| `GRPC_TLS_KEY_PATH` | *(unset)* | Private key paired with the above. Setting one alone is an error. |
-| `CACHE_ENTRY_TTL` | `0` | Rejects entries older than this. `0` disables staleness checks. |
-| `STARTUP_TIMEOUT` | `2m` | Budget for startup, including the initial informer sync. |
+| `MUNINN_INJECT_IMAGE` | *(required by `webhook`)* | Image stamped onto injected containers. |
+| `SECRET_SPC_MODE` | `Create` | Whether the webhook generates the `SecretProviderClass` or only validates a pre-provisioned one. |
 
-**Webhook (`muninn webhook`)**
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `MUNINN_INJECT_IMAGE` | *(required)* | Image stamped onto injected containers. Must match the webhook's own Deployment image; startup fails if unset. |
-| `MUNINN_SELF_ADDR` | `muninn.muninn-system.svc.cluster.local:5010` | Address the injected containers dial. |
-| `WEBHOOK_ADDR` | `:8443` | HTTPS bind address. |
-| `WEBHOOK_TLS_CERT_PATH` | `/etc/webhook/certs/tls.crt` | Serving certificate, written by cert-manager. |
-| `WEBHOOK_TLS_KEY_PATH` | `/etc/webhook/certs/tls.key` | Private key paired with the above. |
-| `SECRET_SPC_MODE` | `Create` | `Create` generates the `SecretProviderClass`; `Reference` expects a pre-provisioned one and only validates it. Case-insensitive; an unrecognized value fails startup. |
-| `VAULT_ADDRESS` | `http://vault.kube-system:8200` | Vault address written into the generated `SecretProviderClass`. |
-| `VAULT_ROLE_NAME` | `muninn` | Vault Kubernetes-auth role bound to the CSI driver's ServiceAccount. |
-
-**Both**
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `METRICS_ADDR` | `:9090` | Prometheus `/metrics` bind address. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `localhost:4317` | OTLP trace endpoint (host:port, no scheme). |
-| `OTEL_TRACES_SAMPLE_ARG` | `0.1` | Root-span sample ratio. A caller's own sampling decision is honored when present. |
-
-> [!NOTE]
-> TLS on the gRPC API is opt-in and off by default, on the assumption that
-> a service mesh may already terminate it. The webhook's TLS is not
-> optional: the Kubernetes API server calls admission webhooks over TLS
-> unconditionally. See [`docs/design.md`](docs/design.md) for why the two
-> are treated differently.
+Full reference, including TLS and tracing settings:
+[`docs/configuration.md`](docs/configuration.md).
 
 ## Observability
 
-Muninn exports an OpenTelemetry span for every gRPC call over OTLP to
-`$OTEL_EXPORTER_OTLP_ENDPOINT` (default `localhost:4317`). Nothing needs to
-be listening there for Muninn to run: spans fail to export silently if
-the endpoint is unset or unreachable. To see them, run
-[Jaeger](https://www.jaegertracing.io/)'s all-in-one image, which bundles
-the collector, storage, and UI in one container:
+Prometheus metrics on `$METRICS_ADDR` (default `:9090`), and an OpenTelemetry
+span for every gRPC call and admission request exported over OTLP. Nothing
+needs to be listening for Muninn to run.
 
-```bash
-podman run -d --name jaeger \
-  -p 16686:16686 -p 4317:4317 \
-  docker.io/jaegertracing/all-in-one:latest
-# (or `docker run` in place of `podman run`: same image, same flags)
-```
-
-Then run Muninn pointed at it and issue a query:
-
-> [!IMPORTANT]
-> The default sample ratio is `0.1`, so a single manual query has only a
-> 10% chance of being recorded. Set `OTEL_TRACES_SAMPLE_ARG=1` to sample
-> every call for this walkthrough: otherwise Jaeger may show nothing.
-
-```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
-export OTEL_TRACES_SAMPLE_ARG=1
-make run
-```
-
-```bash
-make query NAMESPACE=arasaka KEYS=LOG_LEVEL
-```
-
-Open `http://localhost:16686`, select the `muninn` service, and find the
-trace for that `Query` call.
+[`docs/observability.md`](docs/observability.md) covers the signals, the health
+endpoints, and a local Jaeger walkthrough.
 
 ## Testing
 
 ```bash
-make test-unit             # go test ./... -short, no cluster required
-make test-integration      # runs test/integration/envtest against a local,
-                           # throwaway control plane (etcd + kube-apiserver),
-                           # not the real cluster. Requires KUBEBUILDER_ASSETS;
-                           # see Prerequisites.
-
-make test                  # both
+make test-unit          # no cluster required
+make test-integration   # envtest: a throwaway etcd + kube-apiserver
+make test               # both, and what CI runs
 ```
 
 Unit tests cover the domain layer, the gRPC translation boundary, the
-Kubernetes watch-and-patch logic, observability wiring, and configuration
-parsing, including negative-path and edge-case coverage alongside the
-happy path, not only the resource-scoped merge guarantee described above.
-`make test` and the integration tier both run in CI.
+watch-and-patch logic, observability wiring and configuration parsing, with
+negative and edge cases alongside the happy paths. The integration tier runs
+against a real API server.
 
 ### End-to-end tests
 
-Two end-to-end tiers exist. Neither runs in CI, and that is deliberate:
-both need a real cluster, and the CSI tier additionally needs `kind`,
-`helm` and a container engine to provision one. Running them per commit
-would trade several minutes of wall time for signal that changes only
-when the deployment path itself changes. They are run on demand instead.
+Two end-to-end tiers exist, and neither runs in CI. Both need a real cluster,
+and the CSI tier provisions its own with `kind`, `helm` and a container engine.
+Running them per commit would cost minutes of wall time for signal that only
+changes when the deployment path does, so they run on demand.
 
 ```bash
-# Against a cluster you already have. Requires the image built and loaded
-# first, since `make load` needs interactive sudo.
-make image load
-make test-e2e
+make image load         # `make load` needs interactive sudo
+make test-e2e           # against a cluster you already have
 
-# Provisions its own disposable kind cluster and tears it down after.
-# Requires kind, helm, kubectl and podman or docker on PATH. Several
-# minutes; installs secrets-store-csi-driver and Vault in dev mode.
-make test-e2e-csi
+make test-e2e-csi       # provisions a disposable kind cluster, then tears it down
 ```
 
-`make test-e2e` deploys through the same `make deploy` / `make
-deploy-webhook` targets a person would run by hand, exercises the gRPC
-API over a port-forward, confirms an annotated Pod receives its config
-file, and confirms a ConfigMap edit reaches that file without a restart.
-`make test-e2e-csi` additionally confirms the webhook generates the
-`SecretProviderClass` itself, that a real Vault secret and the config
-file land in the same Pod, and that the sidecar reports a newly added
-secret reference.
+`make test-e2e` deploys through the same targets a person would run by hand,
+then checks the gRPC API, injection into an annotated Pod, and that a ConfigMap
+edit reaches the mounted file without a restart. `make test-e2e-csi` adds the
+CSI path: a webhook-generated `SecretProviderClass`, a real Vault secret and
+the config file in one Pod, and the sidecar reporting a new reference.
 
-Two narrower claims are verified by hand rather than automated: that an
-*unannotated* Pod schedules untouched, and that the webhook's
-`failurePolicy: Fail` does not affect unrelated Pods. See
-[`docs/design.md`](docs/design.md)'s Testing strategy for why.
+Two narrower claims stay manual: that an *unannotated* Pod schedules untouched,
+and that `failurePolicy: Fail` does not affect unrelated Pods.
+[`docs/design.md`](docs/design.md) explains why.
 
 ## Makefile reference
 
@@ -509,23 +362,19 @@ tradeoffs as standalone Architecture Decision Records.
 
 ## Status
 
-Muninn is a portfolio project, not deployed in production. Its design
-reflects patterns used in a production platform, generalized into a
-standalone config resolver with no platform assumptions baked in.
-Feature-complete for its current scope:
+Muninn is a reference implementation, not an operated service. It has not been
+deployed in production, carries no API stability guarantee, and has no release
+or support process. The design reflects patterns used in a production platform,
+generalized so that nothing about that platform is assumed here.
 
-- A pluggable `ConfigSource` interface; `ConfigMap` watching (label-selector scoped) is the registered default, patch-based cache merge across sources, with `ENABLED_CONFIG_SOURCES` to restrict which registered sources actually run
-- The full gRPC `Query`/`Resolve`/`Describe` API
-- `muninnctl`, a kubectl-style CLI for `query`/`describe`
-- A mutating admission webhook (`muninn webhook`) that injects a shared volume, init container, and sidecar into Pods opted in via annotation, and mounts that volume into the Pod's own containers too: config delivered as a file, no gRPC client needed
-- `muninn resolve`: the CLI mode backing the webhook's injected init container (one-shot) and sidecar (`--watch`, drift detection, atomic file writes)
-- A container image (multi-stage, distroless, verified end-to-end into a local k3s node)
-- In-cluster deployment under least-privilege `ServiceAccount`s for both the resolver (`config/manager/`, `config/rbac/`) and the webhook (`config/webhook/`, including cert-manager-issued TLS)
-- Integration tests against a real API server via [`envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/pkg/envtest), covering ConfigMap projection, two sources of one kind resolving independently, the webhook resolving from its own cache with the resolver absent, and the exact RBAC verbs each `SECRET_SPC_MODE` needs: the full set runs in CI
-- An end-to-end deployment test against a real cluster (`test/e2e`, local-only: see Testing above), covering annotated-Pod injection and drift-triggered file reload; unannotated-Pod behavior and `failurePolicy: Fail` blast radius are verified manually instead
-- CSI-orchestrated secret delivery: the webhook derives a `SecretProviderClass` from `*_ref` keys in a namespace's resolved config and injects a CSI volume alongside the plain-config one, with the actual mount exercised end to end against a disposable `kind` cluster (`test/e2e`'s `TestCSIE2E`, also local-only): see `docs/adr/0012-csi-secret-delivery.md` and "Delivering secrets" above
-- OpenTelemetry tracing and Prometheus metrics on every gRPC call and every webhook admission request, `ParentBased` sampling, with a Jaeger walkthrough for viewing traces (see `docs/design.md`)
-- Fx-based dependency wiring and unit test coverage across every package
+Everything the documentation describes is implemented and tested. Unit and
+integration tiers run in CI; the two end-to-end tiers need a real cluster and
+are run on demand, as described under [Testing](#testing).
+
+## Contributing
+
+Issues and pull requests are welcome. [`CONTRIBUTING.md`](CONTRIBUTING.md)
+documents the workflow, the commit convention, and what CI checks.
 
 ## License
 
