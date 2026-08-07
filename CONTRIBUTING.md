@@ -1,9 +1,16 @@
 # Contributing to Muninn
 
-Muninn is a single-maintainer portfolio/reference project. Issues and
-pull requests are welcome regardless: this guide documents the same
-workflow the maintainer follows. By participating, you agree to abide by
+Issues and pull requests are welcome. By participating, you agree to abide by
 the [Code of Conduct](./CODE_OF_CONDUCT.md).
+
+The planned scope of Muninn as a portfolio project is complete, so new
+features are generally outside the project's scope. Pull requests may not be
+reviewed or merged if they fall outside that scope; for larger changes,
+forking the project may be a better approach.
+
+Bug reports are an exception. If you are running Muninn in a real cluster,
+please report any bugs you encounter. They will be investigated on a
+best-effort basis.
 
 ## Getting started
 

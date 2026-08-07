@@ -325,20 +325,17 @@ that `failurePolicy: Fail` does not affect unrelated Pods.
 
 ## Documentation
 
-`make help` lists every target. [`docs/`](docs/) covers configuration,
-observability, the design rationale and the Architecture Decision Records.
+`make help` lists every available target. [`docs/`](docs/) contains
+configuration, observability, design rationale, and Architecture Decision
+Records.
 
 ## Status
 
-Muninn is a portfolio project: a reference implementation, not an operated
-service. It has not been deployed in production, carries no API stability
-guarantee, and has no release or support process. The design reflects patterns
-used in a production platform, generalized so that nothing about that platform
-is assumed here.
-
-Everything the documentation describes is implemented and tested. Unit and
-integration tiers run in CI; the two end-to-end tiers need a real cluster and
-are run on demand, as described under [Testing](#testing).
+Muninn is a portfolio project and reference implementation, not an operated
+service. It has not been deployed in production, does not provide API
+stability guarantees, and has no formal release or support process. Its design
+is based on patterns used in a production platform, generalized so that it
+does not depend on that platform or its environment.
 
 ## Contributing
 
