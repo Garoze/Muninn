@@ -118,22 +118,20 @@ make sample                        # Namespace + a labeled ConfigMap
 
 ### Run it
 
-`make run` forwards `$KUBECONFIG` into Muninn's own `KUBE_CONFIG_PATH`, so
-set `KUBECONFIG` as usual; only the direct `go run` below needs the latter.
-
 ```bash
-export KUBECONFIG=~/.kube/config
 make run
 ```
 
-or directly:
+That reads `~/.kube/config`, or `$KUBECONFIG` if you have one set elsewhere.
+Muninn logs that its informers have synced, then binds the gRPC server on
+`:5010`.
+
+Running the binary without `make` takes Muninn's own variable, which is
+separate from `kubectl`'s:
 
 ```bash
 KUBE_CONFIG_PATH=~/.kube/config go run ./cmd/muninn serve
 ```
-
-On success, Muninn logs that its informers have synced and binds the gRPC
-server on `:5010`.
 
 ### Query it
 
