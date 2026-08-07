@@ -89,32 +89,21 @@ Design principles:
 
 ### Prerequisites
 
-- Go 1.26+, `make`, and a Kubernetes cluster with `kubectl` pointed at it
-  (developed against [k3s](https://k3s.io/); any cluster works)
-
-Optional, depending on what you run:
-
-| For | You also need |
-|---|---|
-| `make deploy-webhook` | [cert-manager](https://cert-manager.io/), which issues the webhook's serving certificate |
-| Secret delivery | [`secrets-store-csi-driver`](https://secrets-store-csi-driver.sigs.k8s.io/) and [Vault](https://www.vaultproject.io/) |
-| `make test-integration` | [`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest), then `export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)` |
-| Calling the API without `muninnctl` | [`grpcurl`](https://github.com/fullstorydev/grpcurl); the server registers reflection, so no `.proto` files are needed |
-
-Muninn orchestrates cert-manager and the CSI driver but installs neither.
+Go 1.26+, `make`, and a Kubernetes cluster with `kubectl` pointed at it
+(developed against [k3s](https://k3s.io/)). Sections below name anything they
+additionally need.
 
 ### Apply the sample fixtures
 
 ```bash
-export KUBECONFIG=~/.kube/config   # or wherever the cluster's kubeconfig lives
-make sample                        # Namespace + a labeled ConfigMap
+make sample
 ```
 
-> [!NOTE]
-> This creates a sample namespace (`arasaka`) with a ConfigMap labeled
-> `muninn.io/config: "runtime"` and a couple of example `data` keys, so
-> there is data to query without further setup. No CRD installation is
-> required: Muninn watches core `ConfigMap` objects.
+That creates the `arasaka` namespace and a ConfigMap labelled
+`muninn.io/config: "runtime"`, so there is data to query straight away.
+
+No CRD installation is needed anywhere: Muninn watches core `ConfigMap`
+objects.
 
 ### Run it
 
@@ -155,9 +144,14 @@ grpcurl -plaintext -d '{
 }' localhost:5010 discovery.v1.DiscoveryService/Query
 ```
 
-Live cluster changes are reflected without restarting the process: try
-`kubectl patch configmap runtime-config -n arasaka --type=merge -p
-'{"data":{"LOG_LEVEL":"debug"}}'` and re-run the `Query` call.
+Edits reach the cache without restarting Muninn. Change a value and query
+again:
+
+```bash
+kubectl patch configmap runtime-config -n arasaka --type=merge \
+  -p '{"data":{"LOG_LEVEL":"debug"}}'
+make query NAMESPACE=arasaka KEYS=LOG_LEVEL
+```
 
 ## Deployment
 
@@ -187,7 +181,9 @@ make query NAMESPACE=arasaka KEYS=LOG_LEVEL
 
 ### Delivering config as a file (the admission webhook)
 
-`make deploy` covers the gRPC API only. The webhook is a separate deployment:
+`make deploy` covers the gRPC API only. The webhook is a separate deployment,
+and needs [cert-manager](https://cert-manager.io/) on the cluster already:
+Muninn issues its serving `Certificate` through it but does not install it.
 
 ```bash
 make deploy-webhook     # apply config/webhook/: Issuer, Certificate,
@@ -212,7 +208,10 @@ back down.
 ### Delivering secrets
 
 Muninn never carries a secret value. A ConfigMap holds a *reference* to one,
-and the CSI driver fetches it straight into the Pod.
+and the CSI driver fetches it straight into the Pod. This needs
+[`secrets-store-csi-driver`](https://secrets-store-csi-driver.sigs.k8s.io/) and
+a supported provider on the cluster; [Vault](https://www.vaultproject.io/) is
+the one implemented here.
 
 A reference is a key ending in `_ref`. Two optional keys sharing its prefix
 refine it:
@@ -287,14 +286,17 @@ make test               # both, and what CI runs
 
 Unit tests cover the domain layer, the gRPC translation boundary, the
 watch-and-patch logic, observability wiring and configuration parsing. The
-integration tier runs against a real API server via `envtest`.
+integration tier runs against a real API server.
+
+`make test-integration` needs
+[`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest):
+
+```bash
+go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)
+```
 
 ### End-to-end tests
-
-Two end-to-end tiers exist, and neither runs in CI. Both need a real cluster,
-and the CSI tier provisions its own with `kind`, `helm` and a container engine.
-Running them per commit would cost minutes of wall time for signal that only
-changes when the deployment path does, so they run on demand.
 
 ```bash
 make image load         # `make load` needs interactive sudo
@@ -302,6 +304,11 @@ make test-e2e           # against a cluster you already have
 
 make test-e2e-csi       # provisions a disposable kind cluster, then tears it down
 ```
+
+Neither runs in CI. Both need a real cluster, and the CSI tier builds its own
+with `kind`, `helm` and a container engine. Per-commit they would cost minutes
+for signal that only changes when the deployment path does, so they run on
+demand.
 
 `make test-e2e` deploys through the same targets a person would run by hand,
 then checks the gRPC API, injection into an annotated Pod, and that a ConfigMap
@@ -320,10 +327,11 @@ observability, the design rationale and the Architecture Decision Records.
 
 ## Status
 
-Muninn is a reference implementation, not an operated service. It has not been
-deployed in production, carries no API stability guarantee, and has no release
-or support process. The design reflects patterns used in a production platform,
-generalized so that nothing about that platform is assumed here.
+Muninn is a portfolio project: a reference implementation, not an operated
+service. It has not been deployed in production, carries no API stability
+guarantee, and has no release or support process. The design reflects patterns
+used in a production platform, generalized so that nothing about that platform
+is assumed here.
 
 Everything the documentation describes is implemented and tested. Unit and
 integration tiers run in CI; the two end-to-end tiers need a real cluster and
