@@ -143,7 +143,7 @@ func TestWebhookResolvesOwnCache_NoServeDependency(t *testing.T) {
 	// same namespace should get injected now that the cache is synced.
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        "my-app",
+			Name:        "netrunner",
 			Annotations: map[string]string{webhookModule.InjectAnnotation: "true"},
 		},
 		Spec: corev1.PodSpec{

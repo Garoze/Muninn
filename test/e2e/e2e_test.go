@@ -37,13 +37,13 @@ const (
 	deployNamespace = "muninn-system"
 	localPort       = 15010 // distinct from `make run`'s default port
 	podPort         = 5010
-	e2eNamespace    = "e2e-test-ns"
+	e2eNamespace    = "chiba"
 )
 
 var deployAppLabels = client.MatchingLabels{"app": "muninn"}
 var webhookAppLabels = client.MatchingLabels{"app": "muninn-webhook"}
 
-const injectPodName = "e2e-inject-test"
+const injectPodName = "netrunner"
 
 // TestE2E deploys Muninn in-cluster via `make deploy` and exercises it
 // through the real gRPC wire protocol over a port-forward. Requires a real
