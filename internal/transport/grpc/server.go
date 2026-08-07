@@ -39,7 +39,7 @@ func NewGRPCListener(cfg *config.Config, log *zap.Logger) (net.Listener, error) 
 
 // NewGRPCServer builds the main gRPC server. Health starts as NOT_SERVING;
 // flip it via the returned HealthServer after cache sync.
-func NewGRPCServer(log *zap.Logger, opts ...grpc.ServerOption) GRPCServerResult {
+func NewGRPCServer(opts ...grpc.ServerOption) GRPCServerResult {
 	s := grpc.NewServer(opts...)
 	hs := observability.RegisterGRPCHealth(s)
 	reflection.Register(s)
@@ -85,6 +85,6 @@ func newGRPCServer(cfg *config.Config, log *zap.Logger, tp *sdktrace.TracerProvi
 		opts = append(opts, tlsOpt)
 	}
 
-	r := NewGRPCServer(log, opts...)
+	r := NewGRPCServer(opts...)
 	return r.Server, r.HealthServer, nil
 }

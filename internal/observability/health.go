@@ -20,7 +20,7 @@ type StandaloneHealth struct {
 	Server *health.Server
 }
 
-// RegisterGRPCHealth registers the gRPC health service on the giver server.
+// RegisterGRPCHealth registers the gRPC health service on the given server.
 // Starts as NOT_SERVING - call MarkHealthServing once the app is ready.
 func RegisterGRPCHealth(s *grpc.Server) *health.Server {
 	hs := health.NewServer()
@@ -65,6 +65,7 @@ func NewStandaloneHealth(lc fx.Lifecycle, cfg *config.Config, log *zap.Logger) *
 				if err := s.Serve(lis); err != nil {
 					log.Error("gRPC health probe server exited",
 						zap.String("addr", cfg.GrpcProbeAddr),
+						zap.Error(err),
 					)
 				}
 			}()

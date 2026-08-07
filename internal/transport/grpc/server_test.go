@@ -66,7 +66,7 @@ func TestNewGRPCListener_PortAlreadyInUseReturnsError(t *testing.T) {
 }
 
 func TestNewGRPCServer_RegistersHealthAndReflection(t *testing.T) {
-	result := NewGRPCServer(zap.NewNop())
+	result := NewGRPCServer()
 
 	if result.Server == nil {
 		t.Fatal("Server is nil")
@@ -85,7 +85,7 @@ func TestNewGRPCServer_RegistersHealthAndReflection(t *testing.T) {
 }
 
 func TestNewGRPCServer_HealthStartsNotServing(t *testing.T) {
-	result := NewGRPCServer(zap.NewNop())
+	result := NewGRPCServer()
 
 	if got := checkStatus(t, result.HealthServer); got.String() != "NOT_SERVING" {
 		t.Errorf("got %v, want NOT_SERVING", got)

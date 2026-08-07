@@ -34,7 +34,7 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 
 	results, missing, revision, err := h.Service.Query(ctx, req.Namespace, req.Keys, req.Strict)
 
-	h.Metrics.QueryDuration.WithLabelValues("query").Observe(time.Since(start).Seconds())
+	h.Metrics.RequestDuration.WithLabelValues("query").Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		if errors.Is(err, app.ErrCacheEntryStale) {
@@ -43,12 +43,12 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 
 		c := classifyError(err)
 
-		h.Metrics.RequestsTotal.WithLabelValues("query", c.resultLabel, c.codelabel).Inc()
+		h.Metrics.RequestsTotal.WithLabelValues("query", c.resultLabel, c.codeLabel).Inc()
 		h.Logger.Error("query failed",
 			zap.String("method", queryMethod),
 			zap.String("namespace", req.Namespace),
 			zap.Int("keys_count", len(req.Keys)),
-			zap.String("grpc_code", c.codelabel),
+			zap.String("grpc_code", c.codeLabel),
 			zap.Error(err),
 		)
 		return nil, status.Error(c.grpcCode, err.Error())
@@ -118,7 +118,7 @@ func (h *DiscoveryHandler) Resolve(ctx context.Context, req *discoveryv1.Resolve
 
 	results, revision, err := h.Service.Resolve(ctx, req.Namespace)
 
-	h.Metrics.QueryDuration.WithLabelValues("resolve").Observe(time.Since(start).Seconds())
+	h.Metrics.RequestDuration.WithLabelValues("resolve").Observe(time.Since(start).Seconds())
 
 	if err != nil {
 		if errors.Is(err, app.ErrCacheEntryStale) {
@@ -127,11 +127,11 @@ func (h *DiscoveryHandler) Resolve(ctx context.Context, req *discoveryv1.Resolve
 
 		c := classifyError(err)
 
-		h.Metrics.RequestsTotal.WithLabelValues("resolve", c.resultLabel, c.codelabel).Inc()
+		h.Metrics.RequestsTotal.WithLabelValues("resolve", c.resultLabel, c.codeLabel).Inc()
 		h.Logger.Error("resolve failed",
 			zap.String("method", resolveMethod),
 			zap.String("namespace", req.Namespace),
-			zap.String("grpc_code", c.codelabel),
+			zap.String("grpc_code", c.codeLabel),
 			zap.Error(err),
 		)
 
@@ -177,7 +177,7 @@ func (h *DiscoveryHandler) Resolve(ctx context.Context, req *discoveryv1.Resolve
 // Uses error.Is because app layer wraps sentinels with fmt.Errorf("%w", ...).
 type errorClassification struct {
 	resultLabel string
-	codelabel   string
+	codeLabel   string
 	grpcCode    codes.Code
 }
 

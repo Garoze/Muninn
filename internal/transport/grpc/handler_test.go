@@ -358,9 +358,9 @@ func TestClassifyError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := classifyError(tt.err)
-			if got.resultLabel != tt.wantResult || got.codelabel != tt.wantCode || got.grpcCode != tt.wantGRPC {
+			if got.resultLabel != tt.wantResult || got.codeLabel != tt.wantCode || got.grpcCode != tt.wantGRPC {
 				t.Errorf("got (%s, %s, %s), want (%s, %s, %s)",
-					got.resultLabel, got.codelabel, got.grpcCode,
+					got.resultLabel, got.codeLabel, got.grpcCode,
 					tt.wantResult, tt.wantCode, tt.wantGRPC)
 			}
 		})

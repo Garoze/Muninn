@@ -12,7 +12,7 @@ func TestNewMetrics_RegistersWithoutPanic(t *testing.T) {
 	m := NewMetrics(reg)
 
 	if m.RequestsTotal == nil || m.InformerEventsTotal == nil || m.CacheStaleRejectionTotal == nil ||
-		m.QueryDuration == nil || m.CacheEntries == nil || m.CacheSynced == nil ||
+		m.RequestDuration == nil || m.CacheEntries == nil || m.CacheSynced == nil ||
 		m.WebhookRequestsTotal == nil || m.WebhookRequestDuration == nil || m.WebhookInjectionsTotal == nil {
 		t.Fatal("NewMetrics left a nil field")
 	}
