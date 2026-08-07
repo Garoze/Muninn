@@ -35,7 +35,10 @@ type ConfigSource interface {
 	// "namespace"), reported via Describe.
 	Scope() string
 
-	// Extract pulls configuration data out of a matching object.
+	// Extract pulls configuration data out of a matching object. A non-nil
+	// empty map means the object carries no keys, which is distinct from nil:
+	// nil means this source cannot read the object at all, and the merge
+	// leaves its existing slice untouched rather than emptying it.
 	Extract(obj client.Object) map[string]any
 }
 
@@ -47,10 +50,32 @@ type ConfigMapSource struct {
 	keyPrefix     string
 }
 
+// ConfigMapSourceOption customizes a ConfigMapSource at registration.
+type ConfigMapSourceOption func(*ConfigMapSource)
+
+// WithKeyPrefix sets this registration's cache-facing identity. Only needed
+// when more than one ConfigMapSource is registered: Kind() is identical across
+// them, so without distinct prefixes their contributions would be
+// indistinguishable in the merge and NewWatcher rejects the registration.
+func WithKeyPrefix(prefix string) ConfigMapSourceOption {
+	return func(s *ConfigMapSource) { s.keyPrefix = prefix }
+}
+
+// WithLabelSelector overrides the selector taken from Config, so a second
+// registration can scope itself to a different set of ConfigMaps than the
+// default one.
+func WithLabelSelector(selector string) ConfigMapSourceOption {
+	return func(s *ConfigMapSource) { s.labelSelector = selector }
+}
+
 // NewConfigMapSource creates a ConfigMapSource scoped to
-// cfg.ConfigMapLabelSelector.
-func NewConfigMapSource(cfg *config.Config) *ConfigMapSource {
-	return &ConfigMapSource{labelSelector: cfg.ConfigMapLabelSelector}
+// cfg.ConfigMapLabelSelector unless an option overrides it.
+func NewConfigMapSource(cfg *config.Config, opts ...ConfigMapSourceOption) *ConfigMapSource {
+	s := &ConfigMapSource{labelSelector: cfg.ConfigMapLabelSelector}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *ConfigMapSource) Kind() string { return "ConfigMap" }
@@ -80,11 +105,10 @@ func (s *ConfigMapSource) Extract(obj client.Object) map[string]any {
 	return toAnyMap(cm.Data)
 }
 
+// toAnyMap always returns a non-nil map. The API server stores a ConfigMap
+// whose every key was removed as nil Data, and returning nil for that would
+// read as "unreadable object" and leave the removed keys cached indefinitely.
 func toAnyMap(m map[string]string) map[string]any {
-	if m == nil {
-		return nil
-	}
-
 	out := make(map[string]any, len(m))
 	for k, v := range m {
 		out[k] = v

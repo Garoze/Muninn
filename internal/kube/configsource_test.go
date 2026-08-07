@@ -44,9 +44,16 @@ func TestConfigMapSource_Extract(t *testing.T) {
 		}
 	})
 
-	t.Run("nil Data returns nil", func(t *testing.T) {
-		if got := src.Extract(&corev1.ConfigMap{}); got != nil {
-			t.Errorf("got %+v, want nil", got)
+	// A ConfigMap whose keys were all removed arrives from the API server with
+	// nil Data. That has to extract to an empty map, not nil: nil means
+	// "unreadable", which leaves the removed keys cached.
+	t.Run("nil Data returns an empty non-nil map", func(t *testing.T) {
+		got := src.Extract(&corev1.ConfigMap{})
+		if got == nil {
+			t.Fatal("got nil, want an empty non-nil map")
+		}
+		if len(got) != 0 {
+			t.Errorf("got %+v, want empty", got)
 		}
 	})
 
@@ -59,11 +66,15 @@ func TestConfigMapSource_Extract(t *testing.T) {
 }
 
 func TestToAnyMap(t *testing.T) {
-	if got := toAnyMap(nil); got != nil {
-		t.Errorf("nil input: got %+v, want nil", got)
+	got := toAnyMap(nil)
+	if got == nil {
+		t.Error("nil input: got nil, want an empty non-nil map")
+	}
+	if len(got) != 0 {
+		t.Errorf("nil input: got %+v, want empty", got)
 	}
 
-	got := toAnyMap(map[string]string{"a": "1", "b": "2"})
+	got = toAnyMap(map[string]string{"a": "1", "b": "2"})
 	if len(got) != 2 || got["a"] != "1" || got["b"] != "2" {
 		t.Errorf("got %+v", got)
 	}

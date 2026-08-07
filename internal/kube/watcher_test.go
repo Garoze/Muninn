@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -111,6 +112,26 @@ func TestApplyPatch_SourceScopedMerge(t *testing.T) {
 	}
 }
 
+// A source that still exists but now carries no keys empties its own slice
+// rather than leaving the previous keys in place. Distinct from clearData,
+// which removes the slice entirely because the object is gone.
+func TestApplyPatch_EmptyDataClearsKeysButKeepsSource(t *testing.T) {
+	w := newTestWatcher(t)
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{"LOG_LEVEL": "info"}, revision: "1"})
+	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{}, revision: "2"})
+
+	entry := w.appCache.Get("ns1")
+	if entry == nil {
+		t.Fatal("expected namespace to remain cached: the source object still exists")
+	}
+	if len(entry.Sources["cm-a"]) != 0 {
+		t.Errorf("expected cm-a's keys to be gone, got %+v", entry.Sources["cm-a"])
+	}
+	if len(entry.Merged()) != 0 {
+		t.Errorf("expected an empty merged view, got %+v", entry.Merged())
+	}
+}
+
 func TestApplyPatch_ClearOnlyClearsOwnSource(t *testing.T) {
 	w := newTestWatcher(t)
 	w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{"LOG_LEVEL": "info"}, revision: "1"})
@@ -176,6 +197,38 @@ func TestApplyPatch_UpdatedAtUsesExplicitValue(t *testing.T) {
 	entry := w.appCache.Get("ns1")
 	if !entry.UpdatedAt.Equal(explicit) {
 		t.Errorf("UpdatedAt: got %v, want %v", entry.UpdatedAt, explicit)
+	}
+}
+
+// TestApplyPatch_ConcurrentSourcesDoNotLoseUpdates is
+// TestApplyPatch_SourceScopedMerge's concurrent counterpart. Each source's
+// informer delivers events on its own goroutine, so a read-modify-write that
+// isn't atomic drops one source's slice wholesale. -race can't catch this:
+// every individual Cache call is already mutex-guarded, so it's a lost update
+// rather than a data race.
+func TestApplyPatch_ConcurrentSourcesDoNotLoseUpdates(t *testing.T) {
+	for i := range 200 {
+		w := newTestWatcher(t)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			w.applyPatch(configPatch{namespace: "ns1", source: "cm-a", data: map[string]any{"LOG_LEVEL": "info"}})
+		}()
+		go func() {
+			defer wg.Done()
+			w.applyPatch(configPatch{namespace: "ns1", source: "cm-b", data: map[string]any{"FEATURE_FLAG": "true"}})
+		}()
+		wg.Wait()
+
+		entry := w.appCache.Get("ns1")
+		if entry == nil {
+			t.Fatalf("iteration %d: namespace missing from cache entirely", i)
+		}
+		if entry.Sources["cm-a"]["LOG_LEVEL"] != "info" || entry.Sources["cm-b"]["FEATURE_FLAG"] != "true" {
+			t.Fatalf("iteration %d: a source's slice was lost: got %+v", i, entry.Sources)
+		}
 	}
 }
 

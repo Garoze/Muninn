@@ -23,16 +23,25 @@ import (
 // Watcher watches a set of pluggable ConfigSources via controller-runtime
 // informers and keeps the in-memory app.Cache in sync.
 type Watcher struct {
-	crCache  ctrlcache.Cache
+	caches   []sourceCache
 	appCache *app.Cache
 	metrics  *observability.Metrics
 	mainHS   *health.Server
 	probeHS  *observability.StandaloneHealth
 	log      *zap.Logger
-	sources  []ConfigSource
 
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// sourceCache pairs a ConfigSource with the informer cache scoped to its own
+// label selector. One cache per source, rather than one shared cache with a
+// per-object selector: a single cache keys its informers by GVK, so two sources
+// watching the same type would share one informer and one selector, with the
+// other silently dropped.
+type sourceCache struct {
+	source ConfigSource
+	cache  ctrlcache.Cache
 }
 
 // configPatch carries a source-scoped update for a single namespace.
@@ -90,41 +99,42 @@ func NewWatcher(
 		return nil, err
 	}
 
-	byObject := make(map[client.Object]ctrlcache.ByObject, len(sources))
+	caches := make([]sourceCache, 0, len(sources))
 	for _, src := range sources {
 		selector, err := labels.Parse(src.LabelSelector())
 		if err != nil {
 			return nil, fmt.Errorf("parsing label selector for %s source: %w", src.Kind(), err)
 		}
-		byObject[src.Watch()] = ctrlcache.ByObject{Label: selector}
-	}
 
-	c, err := ctrlcache.New(restCfg, ctrlcache.Options{
-		Scheme:   scheme,
-		ByObject: byObject,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("creating controller-rutime cache: %w", err)
+		c, err := ctrlcache.New(restCfg, ctrlcache.Options{
+			Scheme:               scheme,
+			DefaultLabelSelector: selector,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("creating controller-runtime cache for %s source: %w", src.Kind(), err)
+		}
+
+		caches = append(caches, sourceCache{source: src, cache: c})
 	}
 
 	return &Watcher{
-		crCache:  c,
+		caches:   caches,
 		appCache: appCache,
 		metrics:  metrics,
 		mainHS:   mainHS,
 		probeHS:  probeHS,
 		log:      log.Named("watcher"),
-		sources:  sources,
 	}, nil
 }
 
-// Start registers informer handlers, starts the cache, waits for sync,
-// seeds appCache from the initial lis, then marks the service ready.
+// Start registers informer handlers, starts every source's cache, waits for
+// all of them to sync, seeds appCache from the initial list, then marks the
+// service ready.
 func (w *Watcher) Start(ctx context.Context) error {
 	w.ctx, w.cancel = context.WithCancel(context.Background())
 
-	for _, src := range w.sources {
-		if err := w.registerInformerHandlers(w.ctx, src.Watch(), src.Kind(), w.onSourceUpsert(src), w.onSourceDelete(src)); err != nil {
+	for _, sc := range w.caches {
+		if err := w.registerInformerHandlers(w.ctx, sc); err != nil {
 			w.cancel()
 			return err
 		}
@@ -132,21 +142,29 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	w.metrics.CacheSynced.Set(0)
 
-	errCh := make(chan error, 1)
-	go func() {
-		if err := w.crCache.Start(w.ctx); err != nil {
-			select {
-			case errCh <- fmt.Errorf("starting controler-runtime cache: %w", err):
-			default:
+	errCh := make(chan error, len(w.caches))
+	for _, sc := range w.caches {
+		go func() {
+			if err := sc.cache.Start(w.ctx); err != nil {
+				select {
+				case errCh <- fmt.Errorf("starting controller-runtime cache for %s source: %w", sc.source.Kind(), err):
+				default:
+				}
 			}
-		}
-	}()
+		}()
+	}
 
+	// Every source has to be synced before the service reports ready:
+	// answering from a partially-loaded cache is the false-negative this gate
+	// exists to prevent.
 	syncedCh := make(chan struct{})
 	go func() {
-		if w.crCache.WaitForCacheSync(ctx) {
-			close(syncedCh)
+		for _, sc := range w.caches {
+			if !sc.cache.WaitForCacheSync(ctx) {
+				return
+			}
 		}
+		close(syncedCh)
 	}()
 
 	select {
@@ -190,18 +208,18 @@ func (w *Watcher) Stop() {
 // for every source without per-kind code.
 func (w *Watcher) SeedCache(ctx context.Context) error {
 	total := 0
-	for _, src := range w.sources {
-		list := src.List()
-		if err := w.crCache.List(ctx, list); err != nil {
-			return fmt.Errorf("listing %s: %w", src.Kind(), err)
+	for _, sc := range w.caches {
+		list := sc.source.List()
+		if err := sc.cache.List(ctx, list); err != nil {
+			return fmt.Errorf("listing %s: %w", sc.source.Kind(), err)
 		}
 
 		items, err := apimeta.ExtractList(list)
 		if err != nil {
-			return fmt.Errorf("extracting %s list items: %w", src.Kind(), err)
+			return fmt.Errorf("extracting %s list items: %w", sc.source.Kind(), err)
 		}
 
-		upsert := w.onSourceUpsert(src)
+		upsert := w.onSourceUpsert(sc.source)
 		for _, obj := range items {
 			upsert(obj)
 		}
@@ -220,54 +238,52 @@ func (w *Watcher) applyPatch(p configPatch) {
 		return
 	}
 
-	cur := w.appCache.Get(p.namespace)
-
-	sources := make(map[string]map[string]any)
-	revision := p.revision
-	if cur != nil {
-		maps.Copy(sources, cur.Sources)
-		if revision == "" {
-			revision = cur.Revision
+	w.appCache.Apply(p.namespace, func(cur *app.ConfigEntry) *app.ConfigEntry {
+		sources := make(map[string]map[string]any)
+		revision := p.revision
+		if cur != nil {
+			maps.Copy(sources, cur.Sources)
+			if revision == "" {
+				revision = cur.Revision
+			}
 		}
-	}
 
-	if p.data != nil {
-		sources[p.source] = p.data
-	}
+		if p.data != nil {
+			sources[p.source] = p.data
+		}
 
-	if p.clearData {
-		delete(sources, p.source)
-	}
+		if p.clearData {
+			delete(sources, p.source)
+		}
 
-	updated := p.updated
-	if updated.IsZero() {
-		updated = time.Now().UTC()
-	}
+		if len(sources) == 0 {
+			return nil
+		}
 
-	if len(sources) == 0 {
-		w.appCache.Delete(p.namespace)
-	} else {
-		w.appCache.Set(&app.ConfigEntry{
+		updated := p.updated
+		if updated.IsZero() {
+			updated = time.Now().UTC()
+		}
+
+		return &app.ConfigEntry{
 			Namespace: p.namespace,
 			Sources:   sources,
 			Revision:  revision,
 			UpdatedAt: updated,
-		})
-	}
+		}
+	})
 
+	// Outside Apply: Len takes a read lock, and sync.RWMutex isn't reentrant.
 	w.metrics.CacheEntries.Set(float64(w.appCache.Len()))
 }
 
-func (w *Watcher) registerInformerHandlers(
-	ctx context.Context,
-	obj client.Object,
-	resourceName string,
-	onUpsert func(any),
-	onDelete func(any),
-) error {
-	informer, err := w.crCache.GetInformer(ctx, obj)
+func (w *Watcher) registerInformerHandlers(ctx context.Context, sc sourceCache) error {
+	onUpsert := w.onSourceUpsert(sc.source)
+	onDelete := w.onSourceDelete(sc.source)
+
+	informer, err := sc.cache.GetInformer(ctx, sc.source.Watch())
 	if err != nil {
-		return fmt.Errorf("getting %s informer: %w", resourceName, err)
+		return fmt.Errorf("getting %s informer: %w", sc.source.Kind(), err)
 	}
 
 	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -284,7 +300,7 @@ func (w *Watcher) registerInformerHandlers(
 			onDelete(obj)
 		},
 	}); err != nil {
-		return fmt.Errorf("adding %s event handler: %w", resourceName, err)
+		return fmt.Errorf("adding %s event handler: %w", sc.source.Kind(), err)
 	}
 
 	return nil

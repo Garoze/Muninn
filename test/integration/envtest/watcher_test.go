@@ -134,6 +134,29 @@ func TestWatcherProjection(t *testing.T) {
 		}, "cache did not reflect ConfigMap update within timeout")
 	})
 
+	// A ConfigMap that still exists but has had every key removed must drop
+	// those keys from the merged view. The API server stores the cleared field
+	// as nil, so a merge that reads nil as "this source contributed no update"
+	// would keep serving the removed keys indefinitely. Only a real API server
+	// round trip proves this; a hand-built fixture can't.
+	t.Run("clearing every key removes them from the merged view", func(t *testing.T) {
+		patch := client.MergeFrom(cmA.DeepCopy())
+		cmA.Data = nil
+		if err := k8sClient.Patch(context.Background(), cmA, patch); err != nil {
+			t.Fatalf("clear configmap data: %v", err)
+		}
+
+		eventually(t, 10*time.Second, func() bool {
+			e := appCache.Get("arasaka")
+			if e == nil {
+				return false
+			}
+			merged := e.Merged()
+			// cmB is untouched, so the namespace's entry itself must survive.
+			return merged["LOG_LEVEL"] == nil && merged["DARK_MODE"] == "true"
+		}, "cache still serves LOG_LEVEL after every key was removed from its ConfigMap")
+	})
+
 	t.Run("ConfigMap delete clears only its own section (negative path)", func(t *testing.T) {
 		if err := k8sClient.Delete(context.Background(), cmA); err != nil {
 			t.Fatalf("delete configmap: %v", err)
