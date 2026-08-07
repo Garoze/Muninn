@@ -19,7 +19,8 @@ Beyond what the admission webhook already requires (see
 | [`secrets-store-csi-driver`](https://secrets-store-csi-driver.sigs.k8s.io/) | The Node Plugin DaemonSet that performs the mount |
 | A supported provider | Resolves a reference against a real store. [Vault](https://www.vaultproject.io/) is the provider implemented here |
 
-Neither is installed by this repository, in the same category as cert-manager.
+Neither is installed by this repository, in the same category as the
+cert-manager dependency the webhook already carries.
 
 ## The reference convention
 
