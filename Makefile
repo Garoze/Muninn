@@ -8,6 +8,8 @@ WEBHOOK_DIR := config/webhook
 PROTO_DIR   := proto
 PROTO_SRC   := $(PROTO_DIR)/v1
 
+.DEFAULT_GOAL := help
+
 PROTOC          ?= protoc
 IMG             ?= muninn:latest
 KUBECONFIG      ?= $(HOME)/.kube/config
@@ -19,34 +21,34 @@ KEYS      ?=
 MANAGER_BIN ?= muninn
 QUERY_BIN   ?= muninnctl
 
-.PHONY: test test-unit test-integration test-e2e test-e2e-csi build image \
+.PHONY: help test test-unit test-integration test-e2e test-e2e-csi build image \
 	load lint fmt vet tidy proto sample sample-events run query describe \
 	deploy undeploy deploy-webhook undeploy-webhook clean
 
 # regenerate Go code (message types + gRPC stubs) from proto/v1/*.proto
 # requires: protoc, protoc-gen-go, protoc-gen-go-grpc on $PATH
-proto:
+proto: ## Regenerate gRPC stubs from proto/v1 (requires protoc)
 	$(PROTOC) \
 		--proto_path=$(PROTO_SRC) \
 		--go_out=. --go_opt=module=$(MODULE) \
 		--go-grpc_out=. --go-grpc_opt=module=$(MODULE) \
 		$(PROTO_SRC)/discovery.proto
 
-fmt:
+fmt: ## gofmt -l -w .
 	gofmt -l -w .
 
-vet:
+vet: ## go vet ./...
 	go vet ./...
 
-lint:
+lint: ## golangci-lint run ./... (the check CI runs)
 	golangci-lint run ./...
 
-tidy:
+tidy: ## go mod tidy
 	go mod tidy
 
 # compile every cmd/ entrypoint into bin/; falls back to a plain
 # typecheck build while no entrypoints exist yet
-build:
+build: ## Compile every cmd/ entrypoint into bin/
 	@found=0; \
 	if [ -d $(CMD_DIR) ]; then \
 		for d in $(CMD_DIR)/*/; do \
@@ -62,10 +64,10 @@ build:
 		go build ./...; \
 	fi
 
-test: test-unit test-integration
+test: test-unit test-integration ## Run the unit and integration tiers
 
 # unit tests only, no cluster or other external dependencies required
-test-unit:
+test-unit: ## Unit tests only, no cluster required
 	go test ./... -short
 
 # exercises envtest (a local, throwaway control plane); requires KUBEBUILDER_ASSETS
@@ -73,37 +75,37 @@ test-unit:
 # ./cmd/muninn/... is included alongside ./test/integration/envtest/... since
 # some envtest-gated tests live there instead - they exercise unexported
 # package-main internals no external test package can import.
-test-integration:
+test-integration: ## Integration tests against a throwaway control plane
 	MUNINN_IT_ENVTEST=1 go test ./test/integration/envtest/... ./cmd/muninn/... -v -count=1
 
 # deploys against your real cluster via `make deploy`/`undeploy` and exercises
 # it over a port-forward. Requires the image already built and loaded
 # (`make image load` — not run automatically here, since `load` needs
 # interactive sudo). Not part of `make test` or CI — see docs/design.md.
-test-e2e:
+test-e2e: ## End-to-end against a cluster you already have
 	MUNINN_IT_E2E=1 go test ./test/e2e/... -run TestE2E -v -timeout 8m -count=1
 
 # provisions its own disposable kind cluster and tears it down after -
 # unlike test-e2e, needs no existing cluster or pre-loaded image, but does
 # need kind/podman/helm/kubectl on PATH. Heavier (several minutes); not
 # part of `make test` or CI.
-test-e2e-csi:
+test-e2e-csi: ## End-to-end CSI secret delivery on a disposable kind cluster
 	MUNINN_IT_CSI_E2E=1 go test ./test/e2e/... -run TestCSIE2E -v -timeout 15m -count=1
 
 # override the detected engine with: make image CONTAINER_ENGINE=docker
-image:
+image: ## Build the container image
 	$(CONTAINER_ENGINE) build -t $(IMG) .
 
 # import the built image into the local k3s node's containerd store. Tag
 # with an explicit localhost/ prefix first so config/manager/deployment.yaml's
 # image reference matches regardless of which engine built it — Podman
 # applies this prefix to local images automatically, Docker does not.
-load:
+load: ## Import the image into the local k3s containerd store
 	$(CONTAINER_ENGINE) tag $(IMG) localhost/$(IMG)
 	$(CONTAINER_ENGINE) save localhost/$(IMG) | sudo k3s ctr images import -
 
 # apply the sample Namespace and ConfigMap to the cluster
-sample:
+sample: ## Apply the sample Namespace and labeled ConfigMap
 	kubectl apply -f $(SAMPLES_DIR)/namespace.yaml
 	kubectl apply -f $(SAMPLES_DIR)/configmap.yaml
 
@@ -112,17 +114,17 @@ sample:
 # it's specific to CSI secret-drift Event visibility, not the core resolver
 # `sample` demonstrates. Requires `make sample` (or an equivalent arasaka
 # namespace) already applied.
-sample-events:
+sample-events: ## Apply the sample RBAC for secret-drift Events
 	kubectl apply -f $(SAMPLES_DIR)/event_writer_role.yaml
 	kubectl apply -f $(SAMPLES_DIR)/event_writer_role_binding.yaml
 
 # run the server locally against the cluster in $KUBECONFIG
-run:
+run: ## Run the resolver locally against $KUBECONFIG
 	KUBE_CONFIG_PATH=$(KUBECONFIG) go run ./$(CMD_DIR)/$(MANAGER_BIN) serve
 
 # query the Muninn Query API, e.g.:
 #   make query NAMESPACE=arasaka KEYS=LOG_LEVEL,FEATURE_DARKMODE
-query:
+query: ## Query keys: make query NAMESPACE=<ns> KEYS=<a,b,c>
 	@if [ -z "$(NAMESPACE)" ] || [ -z "$(KEYS)" ]; then \
 		echo "usage: make query NAMESPACE=<namespace> KEYS=<comma,separated,keys>"; \
 		exit 1; \
@@ -130,12 +132,12 @@ query:
 	go run ./$(CMD_DIR)/$(QUERY_BIN) query --namespace $(NAMESPACE) --keys $(KEYS)
 
 # list the active configuration sources
-describe:
+describe: ## List the active configuration sources
 	go run ./$(CMD_DIR)/$(QUERY_BIN) describe
 
 # deploy muninn in-cluster under its own least-privilege ServiceAccount
 # (applied in dependency order: namespace, then RBAC, then the Deployment)
-deploy:
+deploy: ## Apply the resolver in-cluster
 	kubectl apply -f $(MANAGER_DIR)/namespace.yaml
 	kubectl apply -f $(RBAC_DIR)/service_account.yaml
 	kubectl apply -f $(RBAC_DIR)/role.yaml
@@ -147,7 +149,7 @@ deploy:
 # delete alone would cascade the rest, but tearing down explicitly keeps the
 # ClusterRole/ClusterRoleBinding — cluster-scoped, so not caught by that
 # cascade — from being left behind)
-undeploy:
+undeploy: ## Tear down the resolver
 	kubectl delete -f $(MANAGER_DIR)/service.yaml --ignore-not-found
 	kubectl delete -f $(MANAGER_DIR)/deployment.yaml --ignore-not-found
 	kubectl delete -f $(RBAC_DIR)/role_binding.yaml --ignore-not-found
@@ -171,7 +173,7 @@ undeploy:
 # consumer namespaces should drop those two `kubectl apply` lines - role.yaml
 # alone (get/list/watch configmaps, get secretproviderclasses) is sufficient
 # for that mode.
-deploy-webhook:
+deploy-webhook: ## Apply the mutating admission webhook
 	kubectl apply -f $(WEBHOOK_DIR)/issuer.yaml
 	kubectl apply -f $(WEBHOOK_DIR)/certificate.yaml
 	kubectl apply -f $(WEBHOOK_DIR)/service_account.yaml
@@ -186,7 +188,7 @@ deploy-webhook:
 # tear down everything `make deploy-webhook` created (reverse order; the
 # MutatingWebhookConfiguration goes first so the API server stops routing
 # admission requests here before the backend disappears)
-undeploy-webhook:
+undeploy-webhook: ## Tear down the mutating admission webhook
 	kubectl delete -f $(WEBHOOK_DIR)/webhook.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/deployment.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/service.yaml --ignore-not-found
@@ -198,5 +200,9 @@ undeploy-webhook:
 	kubectl delete -f $(WEBHOOK_DIR)/certificate.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/issuer.yaml --ignore-not-found
 
-clean:
+clean: ## Remove bin/
 	rm -rf $(BIN_DIR)
+
+help: ## Show this help
+	@awk 'BEGIN {FS = ":.*##"; printf "\nTargets:\n"} \
+		/^[a-zA-Z0-9_-]+:.*?##/ { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)

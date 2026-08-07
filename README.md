@@ -311,29 +311,10 @@ Two narrower claims stay manual: that an *unannotated* Pod schedules untouched,
 and that `failurePolicy: Fail` does not affect unrelated Pods.
 [`docs/design.md`](docs/design.md) explains why.
 
-## Makefile reference
-
-| Target                                         | Does                                                                      |
-|------------------------------------------------|---------------------------------------------------------------------------|
-| `make sample`                                  | Apply the sample Namespace + labeled ConfigMap                            |
-| `make sample-events`                           | Apply the sample RBAC for secret-drift `Event` visibility (see "Delivering secrets") |
-| `make run`                                     | Run the server locally against `$KUBECONFIG`                              |
-| `make test` / `test-unit` / `test-integration` | Run tests (both tiers run in CI)                                          |
-| `make test-e2e`                                | Deploy + exercise + tear down against a cluster you already have (not in `make test` or CI) |
-| `make test-e2e-csi`                            | Provisions its own disposable `kind` cluster and exercises the CSI secret-delivery path (not in `make test` or CI) |
-| `make query NAMESPACE=<ns> KEYS=<a,b,c>`       | Query keys for a namespace via `muninnctl`                                |
-| `make describe`                                | List the active configuration sources via `muninnctl`                     |
-| `make fmt` / `vet` / `lint` / `tidy`           | Standard Go hygiene; `lint` is the check CI runs                          |
-| `make proto`                                   | Regenerate gRPC stubs from `proto/v1/discovery.proto` (requires `protoc`) |
-| `make build`                                   | Compile `cmd/` entrypoints into `bin/`                                    |
-| `make image` / `load`                          | Build the container image / import it into k3s's containerd store        |
-| `make deploy` / `undeploy`                     | Apply / tear down Muninn in-cluster under its own ServiceAccount          |
-| `make deploy-webhook` / `undeploy-webhook`     | Apply / tear down the mutating admission webhook                          |
-
 ## Documentation
 
-[`docs/`](docs/) covers configuration, observability, the design rationale and
-the Architecture Decision Records.
+`make help` lists every target. [`docs/`](docs/) covers configuration,
+observability, the design rationale and the Architecture Decision Records.
 
 ## Status
 
