@@ -17,9 +17,29 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      # Pinned rather than @latest: an upstream release should not change what
+      # this job enforces without a commit that says so.
       - name: install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
       - run: golangci-lint run ./...
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+      - name: go mod tidy is clean
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
 
   build:
     runs-on: ubuntu-latest
@@ -50,7 +70,9 @@ jobs:
         run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
       - name: fetch envtest binaries (etcd, kube-apiserver)
         run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use -p path)" >> "$GITHUB_ENV"
-      - run: MUNINN_IT_ENVTEST=1 go test ./test/... -run TestWatcherProjection -v -count=1
+      # The same target a developer runs, so CI and local runs cover the same
+      # tests rather than drifting to different subsets.
+      - run: make test-integration
 
   govulncheck:
     runs-on: ubuntu-latest

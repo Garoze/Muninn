@@ -1,0 +1,23 @@
+version: "2"
+
+# Pinned explicitly rather than relying on the tool's defaults, so a
+# golangci-lint upgrade changes what CI enforces only when this file changes.
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+  exclusions:
+    rules:
+      # Table-driven tests routinely ignore errors from helpers whose failure
+      # the assertion itself would surface.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
