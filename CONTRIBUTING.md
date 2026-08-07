@@ -1,7 +1,7 @@
 # Contributing to Muninn
 
 Muninn is a single-maintainer portfolio/reference project. Issues and
-pull requests are welcome regardless — this guide documents the same
+pull requests are welcome regardless: this guide documents the same
 workflow the maintainer follows. By participating, you agree to abide by
 the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
@@ -17,10 +17,11 @@ changes.
 ```bash
 make fmt          # gofmt -l -w .
 make vet          # go vet ./...
-make test-unit     # go test ./... -short
+make lint         # golangci-lint run ./...
+make test-unit    # go test ./... -short
 ```
 
-All three must pass before opening a PR.
+All four must pass before opening a PR; CI runs the same checks.
 
 If your change touches `proto/v1/discovery.proto`, also run:
 
@@ -52,8 +53,8 @@ into independent concerns, open separate PRs rather than bundling them.
 
 ## Documenting a decision
 
-If a change makes a real architectural tradeoff — a genuine alternative
-was rejected, not only "the obvious way to do it" — record it in
+If a change makes a real architectural tradeoff, a genuine alternative
+was rejected, not only "the obvious way to do it": record it in
 [`docs/design.md`](docs/design.md). If it's the kind of decision likely
 to be questioned in review or revisited later, add a standalone entry
 under [`docs/adr/`](docs/adr/) as well, following the existing records'

@@ -6,7 +6,7 @@
 
 The admission webhook's injected init container and sidecar need to
 write out *everything* currently resolved for a scope, with no keys
-enumerated up front — a different shape of request than `Query`, which
+enumerated up front, a different shape of request than `Query`, which
 is built for a caller (a human via a debugging CLI, or a service that
 knows exactly which keys it wants) who names specific keys.
 
@@ -29,7 +29,7 @@ map<string, Value>`, alongside a revision marker) rather than overloading
 
 `Query` and `Resolve` currently duplicate the same cache-lookup
 precedence logic (readiness check, scope lookup, staleness check) rather
-than sharing a helper — an extraction was considered and deliberately not
+than sharing a helper. An extraction was considered and deliberately not
 made, since the two operations' contracts are different enough (specific
 keys with a `missing_keys` list, versus everything with a revision
 marker) that a shared helper would need to serve both shapes rather than

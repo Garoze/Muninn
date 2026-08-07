@@ -23,10 +23,10 @@ than a namespace-scoped role bound per namespace.
 ## Consequences
 
 The access grant is broader than any single namespace's resources
-require — a real, accepted widening of blast radius in exchange for
+require. That is an accepted widening of blast radius in exchange for
 correctly expressing "watch this resource type across a namespace set
 that doesn't exist yet." The grant stays narrow along other axes
 (read-only, scoped to exactly the resource type the registered source
 watches, no subresources) to partially offset this. A bring-your-own
 source kind brings its own RBAC requirement as part of registering that
-source — this grant covers only the reference `ConfigMap` source.
+source: this grant covers only the reference `ConfigMap` source.

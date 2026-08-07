@@ -20,13 +20,13 @@ not an interface it defines for itself.
   mocking a cheap, deterministic dependency would only reimplement its
   logic under test rather than remove a real cost. Interfaces earn
   their keep when the real implementation is expensive or
-  non-deterministic (a database, a network call) — this isn't.
+  non-deterministic (a database, a network call): this isn't.
 
 ## Consequences
 
 Slightly against common Go idiom on its face, but avoids indirection
 with no corresponding benefit today. If a second concrete
-implementation of the domain service appears later — for example, a
-caching decorator in front of it — introducing the interface at that
+implementation of the domain service appears later: for example, a
+caching decorator in front of it: introducing the interface at that
 point costs nothing, since interfaces are satisfied implicitly. This is
 an explicit, accepted reversal condition rather than a permanent bet.

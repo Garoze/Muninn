@@ -5,9 +5,9 @@
 ## Context
 
 Namespace is Muninn's only resolution scope. A first-class tenant
-concept — its own identity object, lifecycle, and validation, layered on
-top of that scope — is a reasonable thing a consumer might want. Building
-one here would imply a security guarantee (validated, isolated tenant
+concept, with its own identity object, lifecycle and validation layered
+on top of that scope, is a reasonable thing a consumer might want.
+Building one here would imply a security guarantee (validated, isolated tenant
 identity) this service cannot actually back up on its own: there is no
 provisioning system behind it that creates tenant identity, and no
 service mesh behind it that validates caller identity at a namespace
@@ -27,7 +27,7 @@ validate, or enforce it.
 - **Keep a first-class tenant identity resource, generified.** Rejected:
   a generic "identity" resource with no reconciler or mesh behind it
   would still overstate what a namespace boundary actually provides on
-  its own — the problem was the implied guarantee, not the resource's
+  its own: the problem was the implied guarantee, not the resource's
   specific field names.
 
 ## Consequences
@@ -36,7 +36,7 @@ The API and domain layer are simpler: a namespace is a string a caller
 provides, resolved directly against the cache, with no separate identity
 lookup or validation step. The cost is that this service makes no claim
 about tenant isolation beyond whatever the caller's own network access
-and Kubernetes RBAC already provide — a consumer relying on this service
+and Kubernetes RBAC already provide. A consumer relying on this service
 for tenant isolation without a service mesh or network policy enforcing
 it at the namespace boundary has a gap this service does not close for
 them, and this ADR states that gap explicitly rather than leaving it
@@ -44,6 +44,6 @@ implicit.
 
 A multi-tenant deployment (one namespace per tenant, a labeled ConfigMap
 in each) composes with this cleanly, since it needs nothing from Muninn
-beyond what any other multi-namespace usage already gets — the cache's
+beyond what any other multi-namespace usage already gets: the cache's
 namespace-keyed isolation is unit-tested against multiple distinct
 namespaces, and the README demonstrates the same pattern end to end.

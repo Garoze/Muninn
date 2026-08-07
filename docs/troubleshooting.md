@@ -2,7 +2,7 @@
 
 Known issues encountered while building and running Muninn, recorded so
 the diagnosis doesn't have to be rediscovered. This is not an on-call
-runbook — Muninn is a portfolio/reference implementation, not an
+runbook: Muninn is a portfolio/reference implementation, not an
 operated production service. It's a record of real problems hit during
 development and how to recognize them again.
 
@@ -30,7 +30,7 @@ test (`make test-e2e`) rather than surfacing as an unrelated timeout.
 ## Killing a locally-run process doesn't stop it
 
 **Symptom:** Running Muninn via `go run ./cmd/muninn` and killing the
-recorded PID doesn't actually stop the server — it keeps holding its
+recorded PID doesn't actually stop the server: it keeps holding its
 port. The same thing happens with a `kubectl port-forward` started in
 the background: it outlives the shell that started it.
 
@@ -47,12 +47,12 @@ rather than assuming a single `kill` on the shell job was sufficient.
 ## Process crashes on first use of a metric, not at startup
 
 **Symptom:** The server starts and runs normally, then panics the first
-time one specific operation executes — not during startup, not under
+time one specific operation executes: not during startup, not under
 load in general, only the first time that one code path runs.
 
 **Cause:** A Prometheus metric's declared label set and the label values
 supplied at its call site have to match in count exactly. A mismatch
-compiles fine and doesn't fail at startup — it only panics the first
+compiles fine and doesn't fail at startup: it only panics the first
 time that specific metric is actually recorded, which can make the
 crash look unrelated to whatever change introduced it.
 

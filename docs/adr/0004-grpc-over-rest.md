@@ -22,7 +22,7 @@ operation, rather than a REST/JSON interface.
 ## Consequences
 
 Heavier client tooling than plain HTTP for any consumer outside the
-cluster's own service mesh — an accepted cost given the API's actual
+cluster's own service mesh, an accepted cost given the API's actual
 consumer population. This also locks the API to gRPC-capable clients
 going forward; a future external-facing use case would need a separate
 gateway rather than a protocol change to this service itself.
