@@ -20,10 +20,10 @@ Muninn resolves runtime configuration for workloads running in Kubernetes.
 It watches labeled ConfigMaps, keeps a merged per-namespace view in memory,
 and serves that view over gRPC.
 
-A mutating admission webhook delivers the same view into a Pod as a file, so
-a workload can consume it with no client code at all. Either way, a
-configuration change reaches a running Pod without a restart, and without
-that Pod holding a watch against the API server.
+A mutating admission webhook delivers the same view into a Pod as a file,
+allowing a workload to consume it without client code. In both cases a
+configuration change reaches a running Pod without a restart, and without that
+Pod holding a watch against the API server.
 
 ```mermaid
 flowchart LR
@@ -36,21 +36,21 @@ flowchart LR
 
 ## Motivation
 
-A workload can read its own ConfigMap directly, and for a single workload
-that is usually the right answer. It stops scaling once many workloads need
-overlapping configuration: each one needs a Kubernetes client, its own RBAC,
-and its own watch against the API server, so read load and watch connections
-grow with the size of the fleet rather than with the amount of data.
+Reading a ConfigMap directly is the right answer for a single workload. It
+stops scaling once many workloads share overlapping configuration: each
+requires a Kubernetes client, its own RBAC, and its own watch, so read load and
+watch connections grow with the size of the fleet rather than with the amount
+of data.
 
-Muninn collapses that to one watcher. Informers hold the current state in
-memory, so a read costs no API server round trip and a change propagates
-within the watch layer's event latency. Consumers get a merged per-namespace
-view, either over gRPC with a documented contract (`Describe`) or as a file
-written into the Pod.
+Muninn reduces that to one watcher. Informers hold the current state in memory,
+so a read costs no API server round trip and a change propagates within the
+watch layer's event latency. Consumers receive a merged per-namespace view,
+over gRPC with a documented contract (`Describe`) or as a file written into the
+Pod.
 
-Namespace is the resolution scope because it is a boundary Kubernetes already
-has. That composes with a single namespace, one namespace per tenant, or a
-consumer's own custom resource, without Muninn dictating which.
+Namespace is the resolution scope because Kubernetes already treats it as a
+boundary. It composes with a single namespace, one namespace per tenant, or a
+consumer's own custom resource, without Muninn prescribing which.
 
 ## Architecture
 
@@ -64,34 +64,44 @@ consumer's own custom resource, without Muninn dictating which.
 | `internal/observability` | metrics, tracing, health |
 | `internal/config` | env-driven configuration |
 
-The domain layer knows nothing about Kubernetes or gRPC; each edge translates
-in its own direction, and that boundary is enforced structurally rather than by
+The domain layer has no knowledge of Kubernetes or gRPC. Each edge translates
+in its own direction, and the boundary is enforced structurally rather than by
 convention.
 
 Design principles:
 
 - **Pluggable sources.** The watch layer, cache and domain layer are written
-  against a `ConfigSource` interface, not against `ConfigMap`. A
+  against a `ConfigSource` interface rather than against `ConfigMap`. A
   bring-your-own custom resource registers as one more source.
 - **Patch-based merge.** Each source object owns its own slice of a namespace's
   state, so one object's update never disturbs another's.
-- **Readiness gating.** Reads stay unavailable until every registered source's
-  informer finishes its initial list and watch.
+- **Readiness gating.** Reads remain unavailable until every registered
+  source's informer completes its initial list and watch.
 - **No admission-time dependency on the resolver.** The webhook runs its own
   watcher and cache, so a resolver outage cannot block Pod scheduling.
 - **No fixed key vocabulary.** Muninn serves whatever keys the source data
   holds; `Describe` reports the sources' shape, not an enumerated key list.
 
-[`docs/design.md`](docs/design.md) has the reasoning behind each, and
-[`docs/adr/`](docs/adr/) records the decisions with the largest tradeoffs.
+[`docs/design.md`](docs/design.md) records the reasoning behind each, and
+[`docs/adr/`](docs/adr/) the decisions with the largest tradeoffs.
 
 ## Getting started
 
 ### Prerequisites
 
-Go 1.26+, `make`, and a Kubernetes cluster with `kubectl` pointed at it
-(developed against [k3s](https://k3s.io/)). Sections below name anything they
-additionally need.
+- Go 1.26+
+- `make`
+- A Kubernetes cluster and `kubectl` configured to reach it (developed against
+  [k3s](https://k3s.io/))
+
+Optional dependencies, which Muninn does not install:
+
+| Dependency | Required for |
+|---|---|
+| [cert-manager](https://cert-manager.io/) | `make deploy-webhook` |
+| [`secrets-store-csi-driver`](https://secrets-store-csi-driver.sigs.k8s.io/) and [Vault](https://www.vaultproject.io/) | Delivering secrets |
+| [`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest) | `make test-integration` |
+| [`grpcurl`](https://github.com/fullstorydev/grpcurl) | Calling the API without `muninnctl` |
 
 ### Apply the sample fixtures
 
@@ -99,11 +109,9 @@ additionally need.
 make sample
 ```
 
-That creates the `arasaka` namespace and a ConfigMap labelled
-`muninn.io/config: "runtime"`, so there is data to query straight away.
-
-No CRD installation is needed anywhere: Muninn watches core `ConfigMap`
-objects.
+This creates the `arasaka` namespace and a ConfigMap labeled
+`muninn.io/config: "runtime"` to query against. No CRD installation is
+required; Muninn watches core `ConfigMap` objects.
 
 ### Run it
 
@@ -111,12 +119,11 @@ objects.
 make run
 ```
 
-That reads `~/.kube/config`, or `$KUBECONFIG` if you have one set elsewhere.
-Muninn logs that its informers have synced, then binds the gRPC server on
-`:5010`.
+This reads `$KUBECONFIG`, defaulting to `~/.kube/config`. Muninn logs that its
+informers have synced, then binds the gRPC server on `:5010`.
 
-Running the binary without `make` takes Muninn's own variable, which is
-separate from `kubectl`'s:
+Running the binary directly requires `KUBE_CONFIG_PATH`, which is separate from
+`kubectl`'s `$KUBECONFIG`:
 
 ```bash
 KUBE_CONFIG_PATH=~/.kube/config go run ./cmd/muninn serve
@@ -132,8 +139,7 @@ make describe
 make query NAMESPACE=arasaka KEYS=LOG_LEVEL,FEATURE_DARKMODE
 ```
 
-Or call the API directly with `grpcurl`, since the server registers gRPC
-reflection:
+The server registers gRPC reflection, so `grpcurl` needs no `.proto` files:
 
 ```bash
 grpcurl -plaintext localhost:5010 discovery.v1.DiscoveryService/Describe
@@ -144,8 +150,7 @@ grpcurl -plaintext -d '{
 }' localhost:5010 discovery.v1.DiscoveryService/Query
 ```
 
-Edits reach the cache without restarting Muninn. Change a value and query
-again:
+Edits reach the cache without a restart:
 
 ```bash
 kubectl patch configmap runtime-config -n arasaka --type=merge \
@@ -155,9 +160,8 @@ make query NAMESPACE=arasaka KEYS=LOG_LEVEL
 
 ## Deployment
 
-`make run` runs Muninn on the host against whatever `$KUBECONFIG` points at,
-which suits development rather than production. `make deploy` runs it as a Pod
-instead, under its own least-privilege `ServiceAccount`:
+`make run` runs Muninn as a host process, suited to development. `make deploy`
+runs it as a Pod under its own least-privilege `ServiceAccount`:
 
 ```bash
 make image      # build the image
@@ -181,16 +185,16 @@ make query NAMESPACE=arasaka KEYS=LOG_LEVEL
 
 ### Delivering config as a file (the admission webhook)
 
-`make deploy` covers the gRPC API only. The webhook is a separate deployment,
-and needs [cert-manager](https://cert-manager.io/) on the cluster already:
-Muninn issues its serving `Certificate` through it but does not install it.
+`make deploy` covers the gRPC API only. The webhook is a separate deployment
+and requires [cert-manager](https://cert-manager.io/) on the cluster; Muninn
+issues its serving `Certificate` through cert-manager but does not install it.
 
 ```bash
 make deploy-webhook     # apply config/webhook/: Issuer, Certificate,
                         # Service, Deployment, MutatingWebhookConfiguration
 ```
 
-Annotate any Pod to opt in. Nothing else in its spec needs to change:
+A Pod opts in through an annotation; nothing else in its spec changes:
 
 ```yaml
 metadata:
@@ -198,20 +202,19 @@ metadata:
     muninn.io/inject: "true"
 ```
 
-At admission, the webhook injects a shared volume, an init container that
-resolves the Pod's namespace once, and a sidecar that keeps the file
-current on an interval, and mounts that volume into the Pod's own
-container too, so the application reads `/etc/muninn/config.yaml`
-directly with no gRPC client of its own. `make undeploy-webhook` tears it
-back down.
+At admission the webhook injects a shared volume, an init container that
+resolves the namespace once, and a sidecar that refreshes the file on an
+interval. It also mounts that volume into the Pod's existing containers, so the
+application reads `/etc/muninn/config.yaml` with no gRPC client of its own.
+`make undeploy-webhook` tears it back down.
 
 ### Delivering secrets
 
-Muninn never carries a secret value. A ConfigMap holds a *reference* to one,
-and the CSI driver fetches it straight into the Pod. This needs
+Muninn never carries a secret value. A ConfigMap holds a *reference* to one and
+the CSI driver mounts it into the Pod directly. This requires
 [`secrets-store-csi-driver`](https://secrets-store-csi-driver.sigs.k8s.io/) and
 a supported provider on the cluster; [Vault](https://www.vaultproject.io/) is
-the one implemented here.
+the provider implemented here.
 
 A reference is a key ending in `_ref`. Two optional keys sharing its prefix
 refine it:
@@ -228,13 +231,13 @@ data:
   driver should fetch. It never reads the value itself.
 - **`_key`** picks one field out of the secret at that path. Without it the
   mounted file holds the whole response as JSON.
-- **`_file`** records where the value will land, for your own reference only.
-  Muninn does not read it. The real path is always `/mnt/secrets-store/`
-  followed by the `_ref` key with `_ref` stripped.
+- **`_file`** is documentation only; Muninn does not read it. The mount path is
+  always `/mnt/secrets-store/` followed by the `_ref` key with `_ref` stripped.
 
-A Pod opts in with the same `muninn.io/inject: "true"` annotation. It also
-needs its `ServiceAccount` bound to a role in the secret store, set up once per
-namespace rather than once per secret. The application then reads files:
+A Pod opts in through the same `muninn.io/inject: "true"` annotation, and its
+`ServiceAccount` must be bound to a role in the secret store. That binding is
+configured once per namespace, not per secret. The application then reads
+files:
 
 ```bash
 cat /etc/muninn/config.yaml         # config, as before
@@ -249,8 +252,8 @@ cat /mnt/secrets-store/db_password  # the secret value
 
 [ADR-0012](docs/adr/0012-csi-secret-delivery.md) covers why secrets flow
 through the driver and never through Muninn, with a trust-boundary diagram.
-`SECRET_SPC_MODE` decides whether the webhook creates that
-`SecretProviderClass` or only validates one you pre-provision.
+`SECRET_SPC_MODE` selects whether the webhook creates that
+`SecretProviderClass` or validates a pre-provisioned one.
 
 ## Configuration
 
@@ -288,7 +291,7 @@ Unit tests cover the domain layer, the gRPC translation boundary, the
 watch-and-patch logic, observability wiring and configuration parsing. The
 integration tier runs against a real API server.
 
-`make test-integration` needs
+`make test-integration` requires
 [`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest):
 
 ```bash
@@ -299,26 +302,26 @@ export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)
 ### End-to-end tests
 
 ```bash
-make image load         # `make load` needs interactive sudo
-make test-e2e           # against a cluster you already have
+make image load         # `make load` requires interactive sudo
+make test-e2e           # against an existing cluster
 
-make test-e2e-csi       # provisions a disposable kind cluster, then tears it down
+make test-e2e-csi       # provisions a disposable kind cluster, then removes it
 ```
 
-Neither runs in CI. Both need a real cluster, and the CSI tier builds its own
-with `kind`, `helm` and a container engine. Per-commit they would cost minutes
-for signal that only changes when the deployment path does, so they run on
-demand.
+`make test-e2e` deploys through the same targets used by hand, then verifies
+the gRPC API, injection into an annotated Pod, and that a ConfigMap edit
+reaches the mounted file without a restart. `make test-e2e-csi` adds the CSI
+path: a webhook-generated `SecretProviderClass`, a Vault secret and the config
+file in one Pod, and the sidecar reporting a new reference.
 
-`make test-e2e` deploys through the same targets a person would run by hand,
-then checks the gRPC API, injection into an annotated Pod, and that a ConfigMap
-edit reaches the mounted file without a restart. `make test-e2e-csi` adds the
-CSI path: a webhook-generated `SecretProviderClass`, a real Vault secret and
-the config file in one Pod, and the sidecar reporting a new reference.
+Neither tier runs in CI. Both require a real cluster, and the CSI tier
+provisions its own with `kind`, `helm` and a container engine. Running them per
+commit would cost minutes for signal that changes only when the deployment path
+does.
 
-Two narrower claims stay manual: that an *unannotated* Pod schedules untouched,
-and that `failurePolicy: Fail` does not affect unrelated Pods.
-[`docs/design.md`](docs/design.md) explains why.
+Two claims remain manual: that an *unannotated* Pod schedules untouched, and
+that `failurePolicy: Fail` does not affect unrelated Pods.
+[`docs/design.md`](docs/design.md) records why.
 
 ## Documentation
 
