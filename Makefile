@@ -21,6 +21,9 @@ KEYS      ?=
 MANAGER_BIN ?= muninn
 QUERY_BIN   ?= muninnctl
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X $(MODULE)/internal/version.Version=$(VERSION)
+
 .PHONY: help test test-unit test-integration test-e2e test-e2e-csi build image \
 	load lint fmt vet tidy proto sample sample-events run query describe \
 	deploy undeploy deploy-webhook undeploy-webhook clean
@@ -56,7 +59,7 @@ build: ## Compile every cmd/ entrypoint into bin/
 			found=1; \
 			name=$$(basename $$d); \
 			echo "==> building $$name"; \
-			go build -o $(BIN_DIR)/$$name ./$$d; \
+			go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$$name ./$$d; \
 		done; \
 	fi; \
 	if [ "$$found" = "0" ]; then \
