@@ -60,7 +60,7 @@ func main() {
 	case "describe":
 		err = cmdDescribe(os.Args[2:])
 	case "version", "--version":
-		fmt.Fprintln(os.Stdout, version.Version)
+		_, _ = fmt.Fprintln(os.Stdout, version.Version)
 		return
 	default:
 		fmt.Fprintf(os.Stderr, "[muninnctl] unknown command: %s\n\n", os.Args[1])

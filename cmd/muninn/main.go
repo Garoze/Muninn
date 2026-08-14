@@ -132,7 +132,7 @@ func run() (*fx.App, error) {
 	case "webhook":
 		return startWebhook()
 	case "version":
-		fmt.Fprintln(os.Stdout, version.Version)
+		_, _ = fmt.Fprintln(os.Stdout, version.Version)
 		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "[muninn] unknown command: %s\n\n", os.Args[1])
