@@ -23,8 +23,8 @@ spec:
       containers:
         - name: muninn-webhook
           # NOTE: must match config/manager/deployment.yaml's image by hand -
-          # the YAML-anchor trick used there only works within a single file,
-          # not across the two separated files kubectl apply -f handles independently.
+          # kubectl apply -f treats the two files independently, so nothing
+          # keeps this in sync automatically.
           image: localhost/muninn:latest
           imagePullPolicy: Never
           args: ["webhook"]
