@@ -19,6 +19,7 @@ import (
 	kubeModule "github.com/garoze/muninn/internal/kube"
 	"github.com/garoze/muninn/internal/observability"
 	grpcTransport "github.com/garoze/muninn/internal/transport/grpc"
+	"github.com/garoze/muninn/internal/version"
 	webhookModule "github.com/garoze/muninn/internal/webhook"
 )
 
@@ -107,11 +108,12 @@ Commands:
   serve      Watch config sources and serve the gRPC Query/Describe/Resolve API
   webhook    Run the mutating admission webhook server
   resolve    Resolve a namespace once (or with --watch) and write it to a file
+  version    Print the version and exit
 
 Usage:
-  muninn [command]
+  muninn [command] [flags]
 
-Use "muninn resolve -h" for resolve's flags.
+Use "muninn <command> --help" for more information about a given command.
 `)
 }
 
@@ -129,6 +131,9 @@ func run() (*fx.App, error) {
 		return startServe()
 	case "webhook":
 		return startWebhook()
+	case "version":
+		_, _ = fmt.Fprintln(os.Stdout, version.Version)
+		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "[muninn] unknown command: %s\n\n", os.Args[1])
 		printUsage(os.Stderr)

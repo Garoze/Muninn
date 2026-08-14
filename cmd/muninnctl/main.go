@@ -13,6 +13,7 @@ import (
 
 	discoveryv1 "github.com/garoze/muninn/gen/discovery/v1"
 	"github.com/garoze/muninn/internal/discoveryclient"
+	"github.com/garoze/muninn/internal/version"
 )
 
 const defaultAddr = "localhost:5010"
@@ -25,6 +26,7 @@ func printUsage(w io.Writer) {
 Commands:
   query      Query configuration values for a namespace
   describe   List the active configuration sources
+  version    Print the version and exit
 
 Usage:
   muninnctl [flags] [command]
@@ -57,6 +59,9 @@ func main() {
 		err = cmdQuery(os.Args[2:])
 	case "describe":
 		err = cmdDescribe(os.Args[2:])
+	case "version", "--version":
+		_, _ = fmt.Fprintln(os.Stdout, version.Version)
+		return
 	default:
 		fmt.Fprintf(os.Stderr, "[muninnctl] unknown command: %s\n\n", os.Args[1])
 		printUsage(os.Stderr)
