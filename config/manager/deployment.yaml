@@ -22,8 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: muninn
-          image: localhost/muninn:latest
-          imagePullPolicy: Never
+          image: ghcr.io/garoze/muninn:latest
           args: ["serve"]
           ports:
             - name: grpc
