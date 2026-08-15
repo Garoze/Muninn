@@ -1,0 +1,51 @@
+name: cut-release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. v0.4.0 (no prerelease suffix)'
+        required: true
+permissions:
+  contents: write
+  actions: write
+jobs:
+  cut-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: guard - must be dispatched from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "cut-release must be run with 'main' selected as the branch to run the workflow from." >&2
+          exit 1
+      - name: validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "version must look like vX.Y.Z with no prerelease suffix (got: ${{ inputs.version }})" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: tag and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ inputs.version }}" -m "${{ inputs.version }}"
+          git push origin "${{ inputs.version }}"
+      - name: create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ inputs.version }}" \
+            --title "${{ inputs.version }}" \
+            --generate-notes
+
+      # same loop-prevention gap as release-please.yml - the tag push above
+      # won't trigger publish.yml on its own, so dispatch it explicitly.
+      - name: trigger publish workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run publish.yml \
+          --ref "${{ inputs.version }}" \
+          -f tag="${{ inputs.version }}"
