@@ -25,8 +25,7 @@ spec:
           # NOTE: must match config/manager/deployment.yaml's image by hand -
           # kubectl apply -f treats the two files independently, so nothing
           # keeps this in sync automatically.
-          image: localhost/muninn:latest
-          imagePullPolicy: Never
+          image: ghcr.io/garoze/muninn:latest
           args: ["webhook"]
           ports:
             - name: https
@@ -34,7 +33,7 @@ spec:
               protocol: TCP
           env:
             - name: MUNINN_INJECT_IMAGE
-              value: localhost/muninn:latest
+              value: ghcr.io/garoze/muninn:latest
             - name: MUNINN_SELF_ADDR
               value: muninn.muninn-system.svc.cluster.local:5010
             - name: SECRET_SPC_MODE
