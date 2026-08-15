@@ -102,12 +102,11 @@ startup fails.
 
 ## What to check before it works
 
-**RBAC.** The resolver's ClusterRole (`config/rbac/role.yaml`) grants
-`configmaps` and nothing else. A new source needs `get`, `list` and `watch` on
-its own resource added there. If the webhook should see the source too, its
-role (`config/webhook/role.yaml`) needs the same grant: the two run under
-separate ServiceAccounts deliberately, so widening one does not widen the
-other.
+**RBAC.** The resolver's ClusterRole grants `configmaps` and nothing else. A
+new source needs `get`, `list` and `watch` on its own resource added to it. If
+the webhook should see the source too, its own ClusterRole needs the same
+grant: the two run under separate ServiceAccounts deliberately, so widening
+one does not widen the other. Both are rendered by the chart.
 
 **A distinct `KeyPrefix`.** Each source owns a slice of a namespace's cache
 entry, keyed by `KeyPrefix` and object name. Two sources sharing a prefix would
