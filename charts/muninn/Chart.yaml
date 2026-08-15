@@ -11,3 +11,16 @@ kubeVersion: ">=1.27.0-0"
 home: https://github.com/Garoze/Muninn
 sources:
   - https://github.com/Garoze/Muninn
+# Both opt-in, default off - see the cert-manager/secrets-store-csi-driver
+# blocks in values.yaml for what each condition controls and why default-off
+# matters. Versions pinned deliberately, matching this repo's own
+# unpinned-@latest-is-unacceptable convention (see ci.yml).
+dependencies:
+  - name: cert-manager
+    version: v1.21.1
+    repository: https://charts.jetstack.io
+    condition: cert-manager.enabled
+  - name: secrets-store-csi-driver
+    version: "1.6.0"
+    repository: https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+    condition: secrets-store-csi-driver.enabled

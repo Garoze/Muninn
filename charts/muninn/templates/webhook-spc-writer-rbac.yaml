@@ -1,4 +1,4 @@
-{{- if and .Values.secrets.enabled (eq .Values.secrets.spcMode "Create") }}
+{{- if and .Values.webhook.enabled .Values.secrets.enabled (eq .Values.secrets.spcMode "Create") }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
