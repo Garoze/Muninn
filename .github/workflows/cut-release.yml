@@ -90,3 +90,32 @@ jobs:
           gh workflow run publish.yml \
           --ref "${{ inputs.version }}" \
           -f tag="${{ inputs.version }}"
+      # release-please's manifest on develop has no awareness of tags cut
+      # here - left alone, its next run continues the prerelease line this
+      # version was cut from instead of a line above it, producing a version
+      # that sorts before the release just published. Resetting the
+      # manifest to the version just cut makes the next alpha compute above
+      # it, the same way "sync with the changelog update" keeps main's tip
+      # accurate after the step before it.
+      - name: resync develop's release-please manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          stripped="${{ inputs.version }}"
+          stripped="${stripped#v}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin develop
+          branch="cut-release/resync-manifest-${{ inputs.version }}"
+          git checkout -b "$branch" origin/develop
+          printf '{\n    ".": "%s"\n}\n' "$stripped" > .release-please-manifest.json
+          if git diff --quiet -- .release-please-manifest.json; then
+            exit 0
+          fi
+          git add .release-please-manifest.json
+          git commit -m "chore(release-please): resync manifest to ${{ inputs.version }}"
+          git push origin "$branch"
+          gh pr create --base develop --head "$branch" \
+            --title "chore(release-please): resync manifest to ${{ inputs.version }}" \
+            --body "Sets the release-please manifest to ${{ inputs.version }}, the version just cut from main, so the next alpha computes above it instead of continuing the prerelease line it was cut from."
+          gh pr merge "$branch" --merge --delete-branch
