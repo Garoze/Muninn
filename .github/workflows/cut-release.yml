@@ -31,6 +31,13 @@ jobs:
       # cut - nothing else renames it to the official version. main requires
       # a PR, so this can't just push the fix directly; it opens one and
       # merges it immediately (0 approvals required on main).
+      #
+      # Every heading except the very first release-please ever cut carries
+      # a [version](compare-link) - only that first one is a bare version
+      # string, since there was no prior tag to compare against. The regex
+      # has to match both shapes, or it silently skips every real heading
+      # and renames whatever bare one it finds first instead - which was a
+      # real bug here, caught by inspecting the actual result of a cut.
       - name: rename the changelog heading
         id: changelog
         env:
@@ -42,7 +49,7 @@ jobs:
           fi
           stripped="${{ inputs.version }}"
           stripped="${stripped#v}"
-          sed -i -E "0,/^## [0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)? \(/{s/^## [0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)? \(/## ${stripped} (/}" CHANGELOG.md
+          sed -i -E "0,/^## \[?[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?\]?(\([^)]*\))? \(/{s/^## \[?[0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)?\]?(\([^)]*\))? \(/## ${stripped} (/}" CHANGELOG.md
           if git diff --quiet -- CHANGELOG.md; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
