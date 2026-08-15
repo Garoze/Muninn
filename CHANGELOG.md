@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.0-alpha.2](https://github.com/Garoze/Muninn/compare/v0.1.0-alpha.1...v0.1.0-alpha.2) (2026-08-15)
+
+
+### Features
+
+* **build:** add ko configuration ([46b56d9](https://github.com/Garoze/Muninn/commit/46b56d9f4b0131e579ff0ebecbd42f90085c025d))
+
+
+### Bug Fixes
+
+* **config:** point the manager/webhook Deployments at the published image ([8edb69b](https://github.com/Garoze/Muninn/commit/8edb69b3494133a1fb1eae58b3a33023408aca63))
+
+
+### Documentation
+
+* update build/deploy docs and troubleshooting for ko ([d56eedc](https://github.com/Garoze/Muninn/commit/d56eedce9ff895abca9f059057d334e5b6f9de4b))
+
 ## 0.1.0-alpha.1 (2026-08-15)
 
 Initial release. Muninn watches labeled ConfigMaps behind a pluggable
