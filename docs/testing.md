@@ -35,9 +35,9 @@ covering behavior a fake client cannot show:
   restatement of it.
 - Clients bound to the RBAC the chart renders, in both `SECRET_SPC_MODE`
   postures. `envtest` enforces RBAC; the fake client does not, and a missing
-  verb here fails a test instead of a cluster. Rendering rather than
-  hand-writing the grants also covers the chart conditional that decides
-  whether the writer role exists at all.
+  verb here fails a test instead of a cluster. The chart's own unit tests
+  cover which grants each mode renders, not whether those grants authorize
+  the write they exist for; that question needs an API server.
 
 Rendering the chart puts `helm` on this tier's prerequisites; without it those
 tests skip.

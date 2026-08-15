@@ -60,9 +60,11 @@ func secretsStoreCRDDir(t *testing.T) string {
 //
 // RBAC is rendered from the chart rather than reconstructed in Go, so this
 // test exercises what actually gets deployed, not a copy that can drift
-// from it. Rendering also puts the chart's own conditionals under test: the
-// writer role's existence is decided by secrets.spcMode, so each case below
-// selects its RBAC by setting the value a user would set.
+// from it. The chart's unit tests already assert which documents each
+// spcMode renders; what they cannot assert is whether those grants
+// authorize anything, since nothing enforces RBAC during templating. Each
+// case below therefore selects its RBAC by setting the value a user would
+// set, and lets a real API server decide the outcome.
 
 var chartDepsOnce sync.Once
 
