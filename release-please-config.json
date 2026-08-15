@@ -5,7 +5,10 @@
             "release-type": "go",
             "versioning": "prerelease",
             "prerelease": true,
-            "prerelease-type": "alpha"
+            "prerelease-type": "alpha",
+            "bump-minor-pre-major": true,
+            "bump-patch-for-minor-pre-major": true,
+            "initial-version": "0.1.0-alpha.1"
         }
     }
 }
