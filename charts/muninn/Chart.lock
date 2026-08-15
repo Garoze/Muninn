@@ -1,0 +1,9 @@
+dependencies:
+- name: cert-manager
+  repository: https://charts.jetstack.io
+  version: v1.21.1
+- name: secrets-store-csi-driver
+  repository: https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+  version: 1.6.0
+digest: sha256:67a49ef7da00e1447d0777e478b78b0358b4f3b3a9d1c9d78b18a78cdabadfb8
+generated: "2026-08-15T03:32:43.477853999-03:00"

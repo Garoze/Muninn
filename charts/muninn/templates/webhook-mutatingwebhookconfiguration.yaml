@@ -1,3 +1,4 @@
+{{- if .Values.webhook.enabled }}
 {{- if eq .Values.certificate.mode "self-signed" }}
 {{- include "muninn.webhookCert" . }}
 {{- end }}
@@ -45,3 +46,4 @@ webhooks:
     # is a dry run, which is exactly what NoneOnDryRun promises the API server.
     sideEffects: NoneOnDryRun
     admissionReviewVersions: ["v1"]
+{{- end }}

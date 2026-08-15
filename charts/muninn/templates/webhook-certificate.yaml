@@ -1,4 +1,4 @@
-{{- if eq .Values.certificate.mode "cert-manager" }}
+{{- if and .Values.webhook.enabled (eq .Values.certificate.mode "cert-manager") }}
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
