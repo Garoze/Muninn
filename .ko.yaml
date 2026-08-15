@@ -1,4 +1,6 @@
-defaultBaseImage: gcr.io/distroless/static@sha256:23795be0fe67b7d47d1ee62b19c7db750152db627d5bbfa31307e892a7575bec
+# Must be the multi-platform index digest rather than a per-platform child
+# manifest - ko can only build the platforms its base image offers.
+defaultBaseImage: gcr.io/distroless/static@sha256:f7f8f729987ad0fdf6b05eeeae94b26e6a0f613bdf46feea7fc40f7bd72953e6
 defaultPlatforms:
   - linux/amd64
   - linux/arm64
