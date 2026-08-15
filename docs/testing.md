@@ -69,6 +69,29 @@ that changes only when the deployment path does. They are gated behind
 environment variables (`MUNINN_IT_E2E`, `MUNINN_IT_CSI_E2E`) so an ordinary
 `go test ./...` skips them.
 
+## Nightly
+
+A scheduled workflow installs the chart and image from GHCR, not this
+checkout, onto a disposable k3s cluster (`k3d`). This is the only tier that
+tests the published artifact rather than the source: a chart that renders
+correctly but references an image tag that was never pushed, a GHCR package
+flipped back to private, or a chart version whose OCI push didn't match
+`Chart.yaml` are all invisible to every other tier. Both signatures are
+verified before anything is installed.
+
+Two cells: cert-manager already present externally (the common case), and a
+bare cluster exercising the two-phase install the opt-in `cert-manager`/
+`secrets-store-csi-driver` subcharts require. Both install into a
+non-default namespace and delete the webhook Pod, confirming the
+replacement schedules — the case where a hardcoded namespace exclusion in
+the `MutatingWebhookConfiguration` would silently fail under
+`failurePolicy: Fail`.
+
+Not yet covered: the wider Kubernetes-version/cert-mode/secrets matrix, and
+upgrading a previously published chart version into the current one — the
+latter has no versioned install path to upgrade *from* until a second real
+chart version is published.
+
 ## Verified manually
 
 Two narrower claims are checked by hand against a real cluster: that an
