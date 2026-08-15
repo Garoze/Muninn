@@ -31,7 +31,7 @@ func TestNew_Defaults(t *testing.T) {
 		"VaultAddress":           {cfg.VaultAddress, "http://vault.kube-system:8200"},
 		"VaultRoleName":          {cfg.VaultRoleName, "muninn"},
 		"WebhookAddr":            {cfg.WebhookAddr, ":8443"},
-		// Where cert-manager's Certificate lands per config/webhook/.
+		// Where the chart mounts the webhook's serving certificate.
 		"WebhookTLSCertPath": {cfg.WebhookTLSCertPath, "/etc/webhook/certs/tls.crt"},
 		"WebhookTLSKeyPath":  {cfg.WebhookTLSKeyPath, "/etc/webhook/certs/tls.key"},
 		// No default is possible: it has to match the webhook's own Deployment
