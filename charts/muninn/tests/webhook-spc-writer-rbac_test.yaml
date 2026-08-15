@@ -1,0 +1,39 @@
+suite: webhook-spc-writer-rbac
+templates:
+  - webhook-spc-writer-rbac.yaml
+tests:
+  - it: renders nothing when secrets is disabled (default)
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders nothing when secrets is enabled but spcMode is Reference
+    set:
+      secrets.enabled: true
+      secrets.spcMode: Reference
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders the ClusterRole and ClusterRoleBinding when secrets is enabled in Create mode
+    set:
+      secrets.enabled: true
+      secrets.spcMode: Create
+    asserts:
+      - hasDocuments:
+          count: 2
+      - documentIndex: 0
+        isKind:
+          of: ClusterRole
+      - documentIndex: 1
+        isKind:
+          of: ClusterRoleBinding
+
+  - it: renders nothing when the webhook itself is disabled, even with secrets in Create mode
+    set:
+      webhook.enabled: false
+      secrets.enabled: true
+      secrets.spcMode: Create
+    asserts:
+      - hasDocuments:
+          count: 0
