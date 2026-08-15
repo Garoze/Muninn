@@ -1,0 +1,25 @@
+name: release-please
+on:
+  push:
+    branches:
+      - develop
+permissions:
+  contents: read
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # A PR/tag from the default GITHUB_TOKEN doesn't trigger other
+      # workflows - GitHub's loop-prevention rule - so this authenticates as
+      # a GitHub App instead, which isn't subject to it.
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          target-branch: develop
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
