@@ -80,9 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      # govulncheck-action sets up Go itself below - a separate setup-go
+      # step here collides with its cache restore once the cache is warm.
       - uses: golang/govulncheck-action@v1
         with:
           go-version-file: go.mod
