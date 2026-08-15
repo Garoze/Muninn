@@ -1,0 +1,41 @@
+image:
+  repository: ghcr.io/garoze/muninn
+  tag: latest
+
+webhook:
+  # Fail blocks Pod creation wherever the webhook applies whenever it's
+  # unavailable; Ignore makes injection silently best-effort instead - a
+  # cluster operator's risk tolerance to set, not something to hardcode.
+  failurePolicy: Fail
+  # Always unioned with kube-system and .Release.Namespace, never a
+  # replacement for them - dropping either reintroduces the deadlock where
+  # an unavailable webhook blocks its own replacement Pod from scheduling.
+  excludedNamespaces: []
+
+certificate:
+  # cert-manager: today's verified behavior; requires cert-manager already
+  #   installed (external prerequisite, not managed by this chart).
+  # self-signed: the chart generates a CA and serving cert itself - zero
+  #   prerequisites, but see webhook-certificate-selfsigned.yaml for the
+  #   rotation hazard this carries on every helm upgrade.
+  # provided: bring your own PKI - supply an existing Secret and CA bundle.
+  mode: cert-manager
+  # The Secret holding the serving cert - consistent across all three modes.
+  # cert-manager writes it, self-signed generates it, provided expects it to
+  # already exist under this name.
+  secretName: muninn-webhook-tls
+  provided:
+    caBundle: ""
+
+secrets:
+  # Off by default: the Create mode below needs a create/patch grant on
+  # SecretProviderClass in arbitrary consumer namespaces, which is exactly
+  # what Reference mode exists to avoid - it must not be granted unasked.
+  enabled: false
+  # Create: the webhook generates the SecretProviderClass itself, needing
+  # create/patch RBAC. Reference: a pre-provisioned SecretProviderClass is
+  # expected and only validated, needing get RBAC alone.
+  spcMode: Create
+  vault:
+    address: http://vault.kube-system:8200
+    roleName: muninn
