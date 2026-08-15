@@ -92,8 +92,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Installs helm, ct, yamllint, and yamale onto the runner - the
-      # chart-testing project's own action, not hand-rolled.
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v4.2.4
+      # Installs ct, yamllint, and yamale onto the runner - the
+      # chart-testing project's own action, not hand-rolled. It does not
+      # install helm itself, hence the separate step above.
       - uses: helm/chart-testing-action@v2.8.0
       - uses: actions/setup-go@v5
         with:
