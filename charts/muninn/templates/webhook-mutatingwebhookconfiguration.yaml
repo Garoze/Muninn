@@ -1,0 +1,47 @@
+{{- if eq .Values.certificate.mode "self-signed" }}
+{{- include "muninn.webhookCert" . }}
+{{- end }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: muninn-webhook
+  {{- if eq .Values.certificate.mode "cert-manager" }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/muninn-webhook-cert
+  {{- end }}
+webhooks:
+  - name: mutate.muninn.io
+    clientConfig:
+      service:
+        name: muninn-webhook
+        namespace: {{ .Release.Namespace }}
+        path: /mutate
+        port: 443
+      {{- if eq .Values.certificate.mode "self-signed" }}
+      caBundle: {{ .muninnWebhookCert.ca }}
+      {{- else if eq .Values.certificate.mode "provided" }}
+      caBundle: {{ required "certificate.provided.caBundle is required when certificate.mode is \"provided\"" .Values.certificate.provided.caBundle }}
+      {{- end }}
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+    # failurePolicy: Fail blocks Pod creation wherever this webhook applies, so
+    # it must not apply to the namespaces needed to recover from the webhook
+    # being down: its own, and the control-plane components in kube-system.
+    # Without this exclusion an unavailable webhook cannot be redeployed,
+    # because its replacement Pod is itself blocked. webhook.excludedNamespaces
+    # is always unioned with both, never a replacement for them - see values.yaml.
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: {{ concat (list "kube-system" .Release.Namespace) .Values.webhook.excludedNamespaces | uniq | toJson }}
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    # In Create mode the webhook creates or updates a SecretProviderClass for
+    # namespaces whose config carries secret references, which is a side effect
+    # outside the admission response. It suppresses that write when the request
+    # is a dry run, which is exactly what NoneOnDryRun promises the API server.
+    sideEffects: NoneOnDryRun
+    admissionReviewVersions: ["v1"]

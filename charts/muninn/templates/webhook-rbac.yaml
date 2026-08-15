@@ -1,0 +1,26 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: muninn-webhook
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  {{- if .Values.secrets.enabled }}
+  - apiGroups: ["secrets-store.csi.x-k8s.io"]
+    resources: ["secretproviderclasses"]
+    verbs: ["get"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: muninn-webhook
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: muninn-webhook
+subjects:
+  - kind: ServiceAccount
+    name: muninn-webhook
+    namespace: {{ .Release.Namespace }}

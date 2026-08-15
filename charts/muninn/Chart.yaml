@@ -1,0 +1,13 @@
+apiVersion: v2
+name: muninn
+description: Kubernetes-native runtime configuration resolver
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+# livenessProbe.grpc (both Deployments) went GA in 1.27; the -0 suffix
+# matters - without it, prerelease-shaped version strings from managed
+# distributions fail the constraint for no good reason.
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/Garoze/Muninn
+sources:
+  - https://github.com/Garoze/Muninn

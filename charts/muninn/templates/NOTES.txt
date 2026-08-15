@@ -1,0 +1,7 @@
+Muninn has been installed into the {{ .Release.Namespace }} namespace.
+
+Check the resolver is ready:
+  kubectl get pods -n {{ .Release.Namespace }} -l app=muninn
+
+Query it once a pod is Ready:
+  kubectl port-forward -n {{ .Release.Namespace }} deploy/muninn 5010:5010

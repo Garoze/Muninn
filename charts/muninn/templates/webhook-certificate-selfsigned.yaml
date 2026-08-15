@@ -1,0 +1,19 @@
+{{- if eq .Values.certificate.mode "self-signed" }}
+{{- include "muninn.webhookCert" . }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Values.certificate.secretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    # helm template renders a fresh cert every time (no live cluster to
+    # look up against); only helm install/upgrade actually reuses one via
+    # lookup - matching the same flag Cilium's own hubble-server-certs
+    # Secret carries for this identical gotcha.
+    muninn.io/helm-template-non-idempotent: "true"
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ .muninnWebhookCert.cert }}
+  tls.key: {{ .muninnWebhookCert.key }}
+  ca.crt: {{ .muninnWebhookCert.ca }}
+{{- end }}
