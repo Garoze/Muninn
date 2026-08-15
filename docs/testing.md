@@ -33,9 +33,14 @@ covering behavior a fake client cannot show:
 - The webhook resolving from its own cache with the resolver absent entirely,
   which is the actual proof of the availability decoupling rather than a
   restatement of it.
-- Clients bound to the real manifests' RBAC, in both `SECRET_SPC_MODE`
+- Clients bound to the RBAC the chart renders, in both `SECRET_SPC_MODE`
   postures. `envtest` enforces RBAC; the fake client does not, and a missing
-  verb here fails a test instead of a cluster.
+  verb here fails a test instead of a cluster. Rendering rather than
+  hand-writing the grants also covers the chart conditional that decides
+  whether the writer role exists at all.
+
+Rendering the chart puts `helm` on this tier's prerequisites; without it those
+tests skip.
 
 ```bash
 go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
@@ -52,8 +57,9 @@ make test-e2e                                      # against an existing cluster
 make test-e2e-csi       # provisions a disposable kind cluster, then removes it
 ```
 
-`make test-e2e` deploys through the same `make deploy` and `make deploy-webhook`
-targets an operator uses, then verifies the gRPC API, injection into an
+`make test-e2e` installs the chart an operator installs, enabling the webhook
+through the same follow-up upgrade a cluster without cert-manager already
+serving has to perform, then verifies the gRPC API, injection into an
 annotated Pod, and that a ConfigMap edit reaches the mounted file without a
 restart.
 
