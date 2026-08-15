@@ -112,6 +112,17 @@ jobs:
         run: helm unittest charts/muninn
       - name: install kubeconform
         run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+      # ct lint's own dependency build needs these repos registered with
+      # helm directly - "helm dependency build" alone (used below for
+      # kubeconform) resolves repository URLs from Chart.yaml without this,
+      # but ct shells out to a plain "helm dependency build" that expects
+      # the repo already known to helm's local config.
+      - name: register subchart repositories
+        run: |
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+      - name: fetch chart dependencies
+        run: helm dependency build charts/muninn
       # helm lint (which ct lint also runs) renders default values only, so
       # a template that only breaks under a non-default combination passes
       # it clean. Each combination here is a real value this chart accepts.
