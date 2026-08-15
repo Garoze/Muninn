@@ -1,0 +1,35 @@
+name: release-please
+on:
+  push:
+    branches:
+      - develop
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          target-branch: develop
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # A tag pushed by the default GITHUB_TOKEN does not itself trigger
+      # another workflow - GitHub's own loop-prevention rule - so
+      # publish.yml's `push: tags` trigger would never fire for a tag
+      # release-please just created. workflow_dispatch made via the API is
+      # explicitly exempt from that rule, so dispatching it directly closes
+      # the gap without a personal access token anywhere.
+      - name: trigger publish workflow
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run publish.yml \
+          --ref "${{ steps.release.outputs.tag_name }}" \
+          -f tag="${{ steps.release.outputs.tag_name }}"
