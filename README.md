@@ -139,6 +139,27 @@ Running Muninn in-cluster and delivering configuration into Pods is covered in
 [`docs/deployment.md`](docs/deployment.md). Calling the API without
 `muninnctl` is covered in [`docs/api.md`](docs/api.md).
 
+### Published chart
+
+The chart is published as an OCI artifact, so there is no `helm repo add` step:
+
+```bash
+helm install muninn oci://ghcr.io/garoze/charts/muninn \
+  --namespace muninn-system --create-namespace
+```
+
+This is the chart's default and assumes cert-manager is already installed
+(see [Prerequisites](#prerequisites)) - the common case. If it isn't:
+`--set certificate.mode=self-signed` needs no external dependency at all, and
+`--set cert-manager.enabled=true --set secrets-store-csi-driver.enabled=true`
+has the chart install its own cert-manager/CSI driver dependencies (a
+two-phase install; `values.yaml` documents the exact sequence). A `provided`
+mode covers bringing your own PKI. `helm show values
+oci://ghcr.io/garoze/charts/muninn` documents every option.
+
+The chart and image are both signed with [cosign](https://github.com/sigstore/cosign)
+under this repository's own GitHub Actions identity.
+
 ## Delivering config as a file
 
 A mutating admission webhook resolves a namespace at Pod admission and writes
