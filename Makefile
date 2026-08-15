@@ -2,9 +2,7 @@ MODULE      := github.com/garoze/muninn
 CMD_DIR     := cmd
 BIN_DIR     := bin
 SAMPLES_DIR := config/samples
-MANAGER_DIR := config/manager
-RBAC_DIR    := config/rbac
-WEBHOOK_DIR := config/webhook
+CHART_DIR   := charts/muninn
 PROTO_DIR   := proto
 PROTO_SRC   := $(PROTO_DIR)/v1
 
@@ -15,7 +13,13 @@ IMG        ?= ghcr.io/garoze/muninn:latest
 IMG_REPO   := $(firstword $(subst :, ,$(IMG)))
 IMG_TAG    := $(word 2,$(subst :, ,$(IMG)))
 KUBECONFIG ?= $(HOME)/.kube/config
-KUSTOMIZE  ?= kustomize
+
+# Release name and the namespace it installs into, distinct from NAMESPACE
+# below - that one is the consumer namespace the query targets resolve for.
+RELEASE           ?= muninn
+RELEASE_NAMESPACE ?= muninn-system
+# Extra values for deploy, e.g. HELM_ARGS="--set webhook.enabled=false".
+HELM_ARGS ?=
 
 NAMESPACE ?=
 KEYS      ?=
@@ -28,7 +32,7 @@ LDFLAGS := -X $(MODULE)/internal/version.Version=$(VERSION)
 
 .PHONY: help test test-unit test-integration test-e2e test-e2e-csi build image \
 	load lint fmt vet tidy proto sample sample-events run query describe \
-	deploy undeploy deploy-webhook undeploy-webhook clean
+	chart-deps deploy undeploy clean
 
 # regenerate Go code (message types + gRPC stubs) from proto/v1/*.proto
 # requires: protoc, protoc-gen-go, protoc-gen-go-grpc on $PATH
@@ -83,8 +87,8 @@ test-unit: ## Unit tests only, no cluster required
 test-integration: ## Integration tests against a throwaway control plane
 	MUNINN_IT_ENVTEST=1 go test ./test/integration/envtest/... ./cmd/muninn/... -v -count=1
 
-# deploys against your real cluster via `make deploy`/`undeploy` and exercises
-# it over a port-forward. Requires the image already built and loaded
+# installs the chart against your real cluster and exercises it over a
+# port-forward. Requires the image already built and loaded
 # (`make image load` — not run automatically here, since `load` needs
 # interactive sudo). Not part of `make test` or CI — see docs/design.md.
 test-e2e: ## End-to-end against a cluster you already have
@@ -148,72 +152,35 @@ query: ## Query keys: make query NAMESPACE=<ns> KEYS=<a,b,c>
 describe: ## List the active configuration sources
 	go run ./$(CMD_DIR)/$(QUERY_BIN) describe
 
-# deploy muninn in-cluster under its own least-privilege ServiceAccount
-# (applied in dependency order: namespace, then RBAC, then the Deployment)
-deploy: ## Apply the resolver in-cluster
-	kubectl apply -f $(MANAGER_DIR)/namespace.yaml
-	kubectl apply -f $(RBAC_DIR)/service_account.yaml
-	kubectl apply -f $(RBAC_DIR)/role.yaml
-	kubectl apply -f $(RBAC_DIR)/role_binding.yaml
-	cd $(MANAGER_DIR) && $(KUSTOMIZE) edit set image $(IMG_REPO)=$(IMG)
-	kubectl apply -k $(MANAGER_DIR)
-	kubectl apply -f $(MANAGER_DIR)/service.yaml
+# vendor the subchart archives into $(CHART_DIR)/charts, which is gitignored.
+# Helm refuses to render or install a chart whose declared dependencies are
+# missing from disk even when every one of them is condition-disabled, as
+# they are by default here. `update` rather than `build` because it resolves
+# the repository URLs straight from Chart.yaml, where `build` goes through
+# helm's registered repository list and fails on a machine that has never
+# added them. Exact version pins keep the resolution deterministic, so
+# Chart.lock does not churn.
+chart-deps: ## Vendor the chart's subchart archives
+	helm dependency update $(CHART_DIR)
 
-# tear down everything `make deploy` created (reverse order; the namespace
-# delete alone would cascade the rest, but tearing down explicitly keeps the
-# ClusterRole/ClusterRoleBinding — cluster-scoped, so not caught by that
-# cascade — from being left behind)
-undeploy: ## Tear down the resolver
-	kubectl delete -f $(MANAGER_DIR)/service.yaml --ignore-not-found
-	kubectl delete -k $(MANAGER_DIR) --ignore-not-found
-	kubectl delete -f $(RBAC_DIR)/role_binding.yaml --ignore-not-found
-	kubectl delete -f $(RBAC_DIR)/role.yaml --ignore-not-found
-	kubectl delete -f $(RBAC_DIR)/service_account.yaml --ignore-not-found
-	kubectl delete -f $(MANAGER_DIR)/namespace.yaml --ignore-not-found
+# install or upgrade the chart against the cluster in $KUBECONFIG. Both roles
+# come from one release, so the webhook is a value rather than a second
+# deploy step:
+#   make deploy HELM_ARGS="--set webhook.enabled=false"
+# which is also the first phase of the two-phase install a cluster whose
+# cert-manager is not already serving needs - see charts/muninn/values.yaml
+# for that sequence and every other value this accepts.
+deploy: chart-deps ## Install or upgrade the chart in-cluster
+	helm upgrade --install $(RELEASE) $(CHART_DIR) \
+		--namespace $(RELEASE_NAMESPACE) --create-namespace \
+		--set image.repository=$(IMG_REPO) --set image.tag=$(IMG_TAG) \
+		$(HELM_ARGS)
 
-# deploy the mutating admission webhook. Requires cert-manager already
-# installed on the cluster (external prerequisite, not managed by this repo)
-# and `make deploy` already applied (needs the muninn-system namespace and
-# the gRPC Service the injected init container/sidecar dial). Applied in
-# dependency order: Issuer/Certificate first so cert-manager has time to
-# issue the Secret the Deployment mounts, then ServiceAccount/RBAC, then
-# Service/Deployment, then the MutatingWebhookConfiguration last so the API
-# server doesn't start routing admission requests before the backend exists.
-#
-# role_spc_writer(_binding).yaml grants create and patch on SecretProviderClass,
-# needed only for SECRET_SPC_MODE=Create (this repo's own reference
-# deployment default - see deployment.yaml). A Reference-mode deployment in
-# an environment that doesn't want the webhook able to create resources in
-# consumer namespaces should drop those two `kubectl apply` lines - role.yaml
-# alone (get/list/watch configmaps, get secretproviderclasses) is sufficient
-# for that mode.
-deploy-webhook: ## Apply the mutating admission webhook
-	kubectl apply -f $(WEBHOOK_DIR)/issuer.yaml
-	kubectl apply -f $(WEBHOOK_DIR)/certificate.yaml
-	kubectl apply -f $(WEBHOOK_DIR)/service_account.yaml
-	kubectl apply -f $(WEBHOOK_DIR)/role.yaml
-	kubectl apply -f $(WEBHOOK_DIR)/role_binding.yaml
-	kubectl apply -f $(WEBHOOK_DIR)/role_spc_writer.yaml
-	kubectl apply -f $(WEBHOOK_DIR)/role_spc_writer_binding.yaml
-	kubectl apply -f $(WEBHOOK_DIR)/service.yaml
-	cd $(WEBHOOK_DIR) && $(KUSTOMIZE) edit set image $(IMG_REPO)=$(IMG)
-	kubectl apply -k $(WEBHOOK_DIR)
-	kubectl apply -f $(WEBHOOK_DIR)/webhook.yaml
-
-# tear down everything `make deploy-webhook` created (reverse order; the
-# MutatingWebhookConfiguration goes first so the API server stops routing
-# admission requests here before the backend disappears)
-undeploy-webhook: ## Tear down the mutating admission webhook
-	kubectl delete -f $(WEBHOOK_DIR)/webhook.yaml --ignore-not-found
-	kubectl delete -k $(WEBHOOK_DIR) --ignore-not-found
-	kubectl delete -f $(WEBHOOK_DIR)/service.yaml --ignore-not-found
-	kubectl delete -f $(WEBHOOK_DIR)/role_spc_writer_binding.yaml --ignore-not-found
-	kubectl delete -f $(WEBHOOK_DIR)/role_spc_writer.yaml --ignore-not-found
-	kubectl delete -f $(WEBHOOK_DIR)/role_binding.yaml --ignore-not-found
-	kubectl delete -f $(WEBHOOK_DIR)/role.yaml --ignore-not-found
-	kubectl delete -f $(WEBHOOK_DIR)/service_account.yaml --ignore-not-found
-	kubectl delete -f $(WEBHOOK_DIR)/certificate.yaml --ignore-not-found
-	kubectl delete -f $(WEBHOOK_DIR)/issuer.yaml --ignore-not-found
+# helm removes the ClusterRole/ClusterRoleBinding along with everything else,
+# since they are release resources rather than something a namespace delete
+# would have to cascade to.
+undeploy: ## Uninstall the chart
+	helm uninstall $(RELEASE) --namespace $(RELEASE_NAMESPACE) --ignore-not-found
 
 clean: ## Remove bin/
 	rm -rf $(BIN_DIR)

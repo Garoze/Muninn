@@ -83,6 +83,9 @@ func TestE2E(t *testing.T) {
 
 	// Self-contained fixtures in a distinct namespace, so this doesn't
 	// collide with sample data a human may have already applied by hand.
+	// Namespace deletion is asynchronous, so back-to-back runs would
+	// otherwise fail here against the previous run's teardown.
+	waitForNamespaceGone(t, k8sClient, e2eNamespace, 60*time.Second)
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: e2eNamespace}}
 	if err := k8sClient.Create(context.Background(), ns); err != nil {
 		t.Fatalf("create namespace: %v", err)
@@ -110,6 +113,12 @@ func TestE2E(t *testing.T) {
 	})
 
 	chartutil.EnsureDependencies(t)
+
+	// Uninstalling deletes the namespace the release owns, and Helm cannot
+	// write its release record into one that is still terminating - so a run
+	// started straight after a previous teardown fails at install without
+	// this.
+	waitForNamespaceGone(t, k8sClient, deployNamespace, 60*time.Second)
 
 	// Resolver only for now; the webhook subtest below turns it on with an
 	// upgrade, which is also the sequence a cluster without cert-manager
@@ -303,6 +312,21 @@ func helmDeploy(t *testing.T, repoRoot string, env []string, action string, sets
 		args = append(args, "--set", s)
 	}
 	runCmd(t, repoRoot, env, "helm", args...)
+}
+
+// waitForNamespaceGone blocks until namespace no longer exists, failing the
+// test if it is still there at the deadline.
+func waitForNamespaceGone(t *testing.T, k8sClient client.Client, namespace string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var ns corev1.Namespace
+		if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: namespace}, &ns); err != nil {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("namespace %s still exists after %s, a previous release may not have finished terminating", namespace, timeout)
 }
 
 func helmUninstall(t *testing.T, repoRoot string, env []string) {
