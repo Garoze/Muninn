@@ -72,6 +72,13 @@ jobs:
         run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.24.1
       - name: fetch envtest binaries (etcd, kube-apiserver)
         run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use -p path)" >> "$GITHUB_ENV"
+      # The webhook RBAC tests render the chart to get the exact grants a
+      # real install applies, so helm is a prerequisite of this tier now.
+      # Without it those tests skip rather than fail, which would lose the
+      # coverage silently.
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v4.2.4
       # The same target a developer runs, so CI and local runs cover the same
       # tests rather than drifting to different subsets.
       - run: make test-integration

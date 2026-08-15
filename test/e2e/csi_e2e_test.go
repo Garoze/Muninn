@@ -19,6 +19,7 @@ import (
 	secretsstorev1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 
 	"github.com/garoze/muninn/internal/kube"
+	"github.com/garoze/muninn/test/chartutil"
 )
 
 const csiClusterName = "muninn-csi-e2e-test"
@@ -122,7 +123,7 @@ EOF
 	runCmd(t, "", env, "kubectl", "apply", "-f", "https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml")
 	waitAllPodsReady(t, k8sClient, "cert-manager", 120*time.Second)
 
-	buildChartDependencies(t, repoRoot, env)
+	chartutil.EnsureDependencies(t)
 
 	// secrets.enabled carries through both phases so the upgrade only ever
 	// changes webhook.enabled. Its Vault defaults already match the dev-mode

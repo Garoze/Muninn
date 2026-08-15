@@ -31,6 +31,7 @@ import (
 
 	discoveryv1 "github.com/garoze/muninn/gen/discovery/v1"
 	"github.com/garoze/muninn/internal/kube"
+	"github.com/garoze/muninn/test/chartutil"
 )
 
 const (
@@ -108,7 +109,7 @@ func TestE2E(t *testing.T) {
 		_ = k8sClient.Delete(context.Background(), cm)
 	})
 
-	buildChartDependencies(t, repoRoot, nil)
+	chartutil.EnsureDependencies(t)
 
 	// Resolver only for now; the webhook subtest below turns it on with an
 	// upgrade, which is also the sequence a cluster without cert-manager
@@ -283,28 +284,14 @@ func runMake(t *testing.T, repoRoot, target string, vars ...string) {
 	}
 }
 
-// chartPath resolves the chart in the working tree. These tests install
-// that one, never the published chart - proving what a consumer pulls from
-// the registry is the nightly workflow's job, deliberately not this suite's.
-func chartPath(repoRoot string) string {
-	return filepath.Join(repoRoot, "charts", "muninn")
-}
-
-// buildChartDependencies vendors the subchart archives into the chart's own
-// charts/ directory, which is gitignored. Helm refuses to render a chart
-// whose declared dependencies are absent from disk even when every one of
-// them is condition-disabled, as they are here.
-func buildChartDependencies(t *testing.T, repoRoot string, env []string) {
-	t.Helper()
-	runCmd(t, repoRoot, env, "helm", "dependency", "build", chartPath(repoRoot))
-}
-
 // helmDeploy runs `helm install` or `helm upgrade` for the chart against
-// deployNamespace, pinning the locally-loaded image. sets are additional
-// --set overrides.
+// deployNamespace, pinning the locally-loaded image. The chart comes from
+// the working tree, never the registry - proving what a consumer pulls from
+// there is the nightly workflow's job, deliberately not this suite's. sets
+// are additional --set overrides.
 func helmDeploy(t *testing.T, repoRoot string, env []string, action string, sets ...string) {
 	t.Helper()
-	args := []string{action, helmRelease, chartPath(repoRoot), "--namespace", deployNamespace}
+	args := []string{action, helmRelease, chartutil.Path(t), "--namespace", deployNamespace}
 	if action == "install" {
 		// The chart carries its own Namespace resource, but Helm writes the
 		// release record into the target namespace before applying anything,
