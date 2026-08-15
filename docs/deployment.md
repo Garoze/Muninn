@@ -16,19 +16,32 @@ KUBE_CONFIG_PATH=~/.kube/config go run ./cmd/muninn serve
 ## The resolver
 
 `make deploy` runs Muninn as a Pod under its own least-privilege
-`ServiceAccount`, granted `configmaps` and nothing else:
+`ServiceAccount`, granted `configmaps` and nothing else. The default `IMG`
+is the published `ghcr.io/garoze/muninn:latest`, so on a cluster that can
+reach GHCR this is the entire deployment:
 
 ```bash
-make image      # build the image
-make load       # import it into k3s's containerd store
-make deploy     # apply config/manager/ + config/rbac/
+make deploy     # apply config/manager/ + config/rbac/, pulling the published image
+```
+
+To run a local build instead - developing against a change not published
+yet - build and load it under a distinct tag first, then point `deploy` at
+that tag. A tag other than `latest` defaults to `imagePullPolicy:
+IfNotPresent`, so the Pod uses what was just loaded rather than pulling the
+real image out from under it:
+
+```bash
+make image IMG=ghcr.io/garoze/muninn:local   # build via ko into bin/image.tar
+make load                                     # import it into k3s's containerd store
+make deploy IMG=ghcr.io/garoze/muninn:local   # apply, pointed at the local build
 ```
 
 > [!NOTE]
 > `make load` imports into k3s specifically. On another cluster, get
-> `localhost/muninn:latest` onto the nodes however that cluster expects
-> (`minikube image load`, `kind load image-archive` after a `podman save`, or
-> a push to a registry the cluster can reach), then run `make deploy`.
+> `bin/image.tar` onto the nodes however that cluster expects (`minikube
+> image load`, `kind load image-archive`, or push the built image to a
+> registry the cluster can reach), then run `make deploy IMG=<that
+> reference>`.
 
 ```bash
 kubectl get pods -n muninn-system   # should reach 1/1 Running
