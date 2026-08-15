@@ -26,10 +26,15 @@ jobs:
           go-version-file: go.mod
       - name: install ko
         run: go install github.com/google/ko@v0.19.1
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v4.2.4
       # GHCR requires a lowercase path; github.repository is "Garoze/Muninn"
       # verbatim, which is an invalid OCI reference if used as-is
       - name: lowercase image repository
-        run: echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+        run: |
+          echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+          echo "CHARTS=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/charts" >> "$GITHUB_ENV"
       - name: log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -73,5 +78,31 @@ jobs:
       - name: verify the pushed signature
         run: |
           cosign verify ${{ env.IMAGE }}@${{ steps.build.outputs.digest }} \
+          --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/publish.yml@${{ github.ref }}" \
+          --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+      # These repos are only needed to vendor the opt-in subchart archives
+      # into the package below - the chart's own version is independent of
+      # this tag and comes from Chart.yaml, unrelated to the image tags above.
+      - name: register subchart repositories
+        run: |
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+      - name: fetch chart dependencies
+        run: helm dependency build charts/muninn
+      # helm push has no --image-refs equivalent, so the digest to sign is
+      # parsed from its own stdout instead of a written file.
+      - name: package and push chart
+        id: chart
+        run: |
+          helm package charts/muninn -d /tmp
+          version=$(helm show chart charts/muninn | awk -F': ' '/^version:/{print $2}')
+          output=$(helm push "/tmp/muninn-${version}.tgz" oci://${{ env.CHARTS }} 2>&1 | tee /dev/stderr)
+          digest=$(echo "$output" | grep -oP 'Digest: \Ksha256:[0-9a-f]+')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: sign the chart digest
+        run: cosign sign --yes ${{ env.CHARTS }}/muninn@${{ steps.chart.outputs.digest }}
+      - name: verify the pushed chart signature
+        run: |
+          cosign verify ${{ env.CHARTS }}/muninn@${{ steps.chart.outputs.digest }} \
           --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/publish.yml@${{ github.ref }}" \
           --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
