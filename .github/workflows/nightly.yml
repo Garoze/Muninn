@@ -1,0 +1,134 @@
+name: nightly
+
+on:
+  schedule:
+    # 03:17 local (UTC-3) - a few minutes past the hour, since round-number
+    # slots are the most contended on shared runners.
+    - cron: "17 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The common case: cert-manager already present, as an external
+          # prerequisite this chart does not manage.
+          - name: base
+            namespace: nightly-base
+            cert_manager_preinstalled: true
+            subcharts_enabled: false
+          # The riskiest path: nothing pre-installed, exercising the
+          # two-phase install the opt-in subcharts require.
+          - name: bare-cluster
+            namespace: nightly-bare
+            cert_manager_preinstalled: false
+            subcharts_enabled: true
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: install crane
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.20.7
+      - uses: sigstore/cosign-installer@v3
+      # Installing from the published artifacts, not this checkout, is the
+      # entire point of this workflow - no checkout step exists here.
+      - name: verify published image signature
+        run: |
+          cosign verify ghcr.io/garoze/muninn:latest \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/.github/workflows/publish.yml@refs/tags/v.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+      # No floating "latest" tag exists for the chart - the highest semver
+      # tag actually published is the equivalent, resolved directly against
+      # the registry rather than assumed from Chart.yaml in this checkout.
+      - name: resolve and verify published chart signature
+        run: |
+          version=$(crane ls ghcr.io/garoze/charts/muninn | grep -v '\.sig$' | sort -V | tail -1)
+          echo "CHART_VERSION=$version" >> "$GITHUB_ENV"
+          digest=$(crane digest ghcr.io/garoze/charts/muninn:"$version")
+          cosign verify ghcr.io/garoze/charts/muninn@"$digest" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/.github/workflows/publish.yml@refs/tags/v.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+      - name: install k3d
+        run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.9.0 bash
+      - name: create cluster
+        run: k3d cluster create nightly-${{ matrix.name }} --image rancher/k3s:v1.36.3-k3s1 --wait --timeout 120s
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v4.2.4
+      - name: install cert-manager
+        if: matrix.cert_manager_preinstalled
+        run: kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.21.1/cert-manager.yaml
+      - name: wait for cert-manager
+        if: matrix.cert_manager_preinstalled
+        run: |
+          kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
+          kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
+      - name: install (single pass)
+        if: matrix.name == 'base'
+        run: |
+          helm install muninn oci://ghcr.io/garoze/charts/muninn --version "$CHART_VERSION" \
+            -n ${{ matrix.namespace }} --create-namespace --wait --timeout 3m
+      # cert-manager's own webhook must be serving before Muninn's Certificate
+      # can be admitted - a single pass with both on races that.
+      - name: install phase 1 - subcharts, webhook off
+        if: matrix.subcharts_enabled
+        run: |
+          helm install muninn oci://ghcr.io/garoze/charts/muninn --version "$CHART_VERSION" \
+            -n ${{ matrix.namespace }} --create-namespace \
+            --set cert-manager.enabled=true --set secrets-store-csi-driver.enabled=true \
+            --set webhook.enabled=false --wait --timeout 3m
+      - name: install phase 2 - webhook on
+        if: matrix.subcharts_enabled
+        run: |
+          helm upgrade muninn oci://ghcr.io/garoze/charts/muninn --version "$CHART_VERSION" \
+            -n ${{ matrix.namespace }} \
+            --set cert-manager.enabled=true --set secrets-store-csi-driver.enabled=true \
+            --wait --timeout 3m
+      - name: confirm resolver is ready
+        run: kubectl rollout status deployment/muninn -n ${{ matrix.namespace }} --timeout=120s
+      - name: confirm webhook is ready
+        run: kubectl rollout status deployment/muninn-webhook -n ${{ matrix.namespace }} --timeout=120s
+      # The webhook's namespaceSelector exclusion must cover its own
+      # release namespace, or an unavailable webhook blocks its own
+      # replacement Pod under failurePolicy: Fail. Installing into a
+      # non-default namespace (both cells here) is what gives this test
+      # teeth - the hardcoded muninn-system exclusion this replaced would
+      # have passed a default-namespace-only version of this check.
+      - name: webhook self-recovery
+        run: |
+          kubectl delete pod -n ${{ matrix.namespace }} -l app=muninn-webhook
+          kubectl wait --for=condition=Ready pod -n ${{ matrix.namespace }} -l app=muninn-webhook --timeout=120s
+      - name: delete cluster
+        if: always()
+        run: k3d cluster delete nightly-${{ matrix.name }}
+
+  notify-on-failure:
+    needs: install
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      # A scheduled workflow that only fails silently to an inbox is worse
+      # than none at all - this makes a red run visible in the repository
+      # itself, reusing one tracking issue rather than opening a new one
+      # per night.
+      - name: open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing=$(gh issue list --repo "${{ github.repository }}" --search "Nightly is failing in:title" --state open --json number --jq '.[0].number')
+          body="Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "${{ github.repository }}" --body "$body"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "Nightly is failing" --body "$body"
+          fi

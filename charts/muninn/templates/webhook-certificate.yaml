@@ -1,0 +1,15 @@
+{{- if and .Values.webhook.enabled (eq .Values.certificate.mode "cert-manager") }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: muninn-webhook-cert
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: {{ .Values.certificate.secretName }}
+  dnsNames:
+    - muninn-webhook.{{ .Release.Namespace }}.svc
+    - muninn-webhook.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    name: muninn-webhook-selfsigned
+    kind: Issuer
+{{- end }}

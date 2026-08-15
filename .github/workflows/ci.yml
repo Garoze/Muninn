@@ -80,9 +80,65 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      # govulncheck-action sets up Go itself below - a separate setup-go
+      # step here collides with its cache restore once the cache is warm.
       - uses: golang/govulncheck-action@v1
         with:
           go-version-file: go.mod
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: azure/setup-helm@v5.0.1
+        with:
+          version: v4.2.4
+      # Installs ct, yamllint, and yamale onto the runner - the
+      # chart-testing project's own action, not hand-rolled. It does not
+      # install helm itself, hence the separate step above.
+      - uses: helm/chart-testing-action@v2.8.0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # helm-unittest ships no provenance file for its releases, so
+      # --verify=false is unavoidable, not a downgrade from some stronger
+      # option. Pinned rather than @latest, same reasoning as every other
+      # tool in this file.
+      - name: install helm-unittest
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.8.2 --verify=false
+      - name: helm unittest
+        run: helm unittest charts/muninn
+      - name: install kubeconform
+        run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+      # ct lint's own dependency build needs these repos registered with
+      # helm directly - "helm dependency build" alone (used below for
+      # kubeconform) resolves repository URLs from Chart.yaml without this,
+      # but ct shells out to a plain "helm dependency build" that expects
+      # the repo already known to helm's local config.
+      - name: register subchart repositories
+        run: |
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo add secrets-store-csi-driver https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts
+      - name: fetch chart dependencies
+        run: helm dependency build charts/muninn
+      # helm lint (which ct lint also runs) renders default values only, so
+      # a template that only breaks under a non-default combination passes
+      # it clean. Each combination here is a real value this chart accepts.
+      - name: kubeconform against every certificate mode and secrets state
+        run: |
+          set -e
+          check() {
+            helm template muninn charts/muninn -n muninn-system "$@" | \
+              kubeconform -strict -summary -kubernetes-version 1.31.0 \
+                -schema-location default \
+                -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          }
+          check
+          check --set secrets.enabled=true --set secrets.spcMode=Create
+          check --set secrets.enabled=true --set secrets.spcMode=Reference
+          check --set certificate.mode=self-signed
+          check --set certificate.mode=provided --set certificate.provided.caBundle=dGVzdA==
+      - name: ct lint
+        run: ct lint --config .github/ct.yaml

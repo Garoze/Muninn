@@ -38,6 +38,12 @@ const (
 	localPort       = 15010 // distinct from `make run`'s default port
 	podPort         = 5010
 	e2eNamespace    = "chiba"
+
+	// A non-"latest" tag defaults to imagePullPolicy: IfNotPresent, so the
+	// deployed Pod uses this locally-loaded build rather than re-pulling
+	// the real published image under the same tag `make deploy` would
+	// otherwise reference by default.
+	localImage = "ghcr.io/garoze/muninn:local"
 )
 
 var deployAppLabels = client.MatchingLabels{"app": "muninn"}
@@ -47,8 +53,9 @@ const injectPodName = "netrunner"
 
 // TestE2E deploys Muninn in-cluster via `make deploy` and exercises it
 // through the real gRPC wire protocol over a port-forward. Requires a real
-// cluster with the image already built and loaded (`make image load`) -
-// not done here, since `make load` needs interactive sudo.
+// cluster with the image already built and loaded under the localImage tag
+// (`make image load IMG=ghcr.io/garoze/muninn:local`) - not done here,
+// since `make load` needs interactive sudo.
 func TestE2E(t *testing.T) {
 	if os.Getenv("MUNINN_IT_E2E") != "1" {
 		t.Skip("set MUNINN_IT_E2E=1 to run e2e tests against a real cluster")
@@ -98,7 +105,7 @@ func TestE2E(t *testing.T) {
 		_ = k8sClient.Delete(context.Background(), cm)
 	})
 
-	runMake(t, repoRoot, "deploy")
+	runMake(t, repoRoot, "deploy", "IMG="+localImage)
 	t.Cleanup(func() {
 		runMake(t, repoRoot, "undeploy")
 	})
@@ -175,7 +182,7 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("new clientset: %v", err)
 		}
 
-		runMake(t, repoRoot, "deploy-webhook")
+		runMake(t, repoRoot, "deploy-webhook", "IMG="+localImage)
 		t.Cleanup(func() { runMake(t, repoRoot, "undeploy-webhook") })
 
 		// Bound the blast radius before anything can trigger the webhook -
@@ -251,11 +258,12 @@ func loadKubeConfig() (*rest.Config, error) {
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides).ClientConfig()
 }
 
-// runMake runs `make <target>` from the project root, failing the test with
-// the command's combined output on error.
-func runMake(t *testing.T, repoRoot, target string) {
+// runMake runs `make <target> [vars...]` from the project root, failing the
+// test with the command's combined output on error. vars are Makefile
+// variable overrides, e.g. "IMG=ghcr.io/garoze/muninn:local".
+func runMake(t *testing.T, repoRoot, target string, vars ...string) {
 	t.Helper()
-	cmd := exec.Command("make", target)
+	cmd := exec.Command("make", append([]string{target}, vars...)...)
 	cmd.Dir = repoRoot
 	var out bytes.Buffer
 	cmd.Stdout = &out

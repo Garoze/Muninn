@@ -7,6 +7,7 @@ on:
         required: true
 permissions:
   contents: write
+  pull-requests: write
   actions: write
 jobs:
   cut-release:
@@ -26,6 +27,46 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # CHANGELOG.md's newest heading still names whatever alpha develop last
+      # cut - nothing else renames it to the official version. main requires
+      # a PR, so this can't just push the fix directly; it opens one and
+      # merges it immediately (0 approvals required on main).
+      - name: rename the changelog heading
+        id: changelog
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ ! -f CHANGELOG.md ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          stripped="${{ inputs.version }}"
+          stripped="${stripped#v}"
+          sed -i -E "0,/^## [0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)? \(/{s/^## [0-9]+\.[0-9]+\.[0-9]+(-alpha\.[0-9]+)? \(/## ${stripped} (/}" CHANGELOG.md
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          branch="cut-release/changelog-${{ inputs.version }}"
+          git checkout -b "$branch"
+          git add CHANGELOG.md
+          git commit -m "docs: rename the changelog heading for ${{ inputs.version }}"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "docs: rename the changelog heading for ${{ inputs.version }}" \
+            --body "Renames CHANGELOG.md's newest heading from the last alpha to ${{ inputs.version }}, part of cutting this release."
+          gh pr merge "$branch" --merge --delete-branch
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+      # the local checkout is still on the side branch created above; the tag
+      # needs to land on main's new tip, changelog fix included.
+      - name: sync with the changelog update
+        if: steps.changelog.outputs.changed == 'true'
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
       - name: tag and push
         run: |
           git config user.name "github-actions[bot]"
@@ -49,3 +90,32 @@ jobs:
           gh workflow run publish.yml \
           --ref "${{ inputs.version }}" \
           -f tag="${{ inputs.version }}"
+      # release-please's manifest on develop has no awareness of tags cut
+      # here - left alone, its next run continues the prerelease line this
+      # version was cut from instead of a line above it, producing a version
+      # that sorts before the release just published. Resetting the
+      # manifest to the version just cut makes the next alpha compute above
+      # it, the same way "sync with the changelog update" keeps main's tip
+      # accurate after the step before it.
+      - name: resync develop's release-please manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          stripped="${{ inputs.version }}"
+          stripped="${stripped#v}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin develop
+          branch="cut-release/resync-manifest-${{ inputs.version }}"
+          git checkout -b "$branch" origin/develop
+          printf '{\n    ".": "%s"\n}\n' "$stripped" > .release-please-manifest.json
+          if git diff --quiet -- .release-please-manifest.json; then
+            exit 0
+          fi
+          git add .release-please-manifest.json
+          git commit -m "chore(release-please): resync manifest to ${{ inputs.version }}"
+          git push origin "$branch"
+          gh pr create --base develop --head "$branch" \
+            --title "chore(release-please): resync manifest to ${{ inputs.version }}" \
+            --body "Sets the release-please manifest to ${{ inputs.version }}, the version just cut from main, so the next alpha computes above it instead of continuing the prerelease line it was cut from."
+          gh pr merge "$branch" --merge --delete-branch

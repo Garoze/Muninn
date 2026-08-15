@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: muninn
-  namespace: muninn-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app: muninn
 spec:
@@ -22,7 +22,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: muninn
-          image: ghcr.io/garoze/muninn:latest
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           args: ["serve"]
           ports:
             - name: grpc

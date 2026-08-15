@@ -1,0 +1,52 @@
+suite: webhook-deployment
+templates:
+  - webhook-deployment.yaml
+tests:
+  - it: renders nothing when the webhook is disabled
+    set:
+      webhook.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: MUNINN_INJECT_IMAGE matches the webhook container's own image
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/garoze/muninn:latest
+      - equal:
+          path: spec.template.spec.containers[0].env[0]
+          value:
+            name: MUNINN_INJECT_IMAGE
+            value: ghcr.io/garoze/muninn:latest
+
+  - it: MUNINN_INJECT_IMAGE tracks the image value even when overridden
+    set:
+      image.repository: ghcr.io/garoze/muninn
+      image.tag: v0.3.0
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/garoze/muninn:v0.3.0
+      - equal:
+          path: spec.template.spec.containers[0].env[0].value
+          value: ghcr.io/garoze/muninn:v0.3.0
+
+  - it: omits secrets env vars when secrets is disabled (default)
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SECRET_SPC_MODE
+            value: Create
+
+  - it: includes secrets env vars when secrets is enabled
+    set:
+      secrets.enabled: true
+      secrets.spcMode: Create
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SECRET_SPC_MODE
+            value: Create

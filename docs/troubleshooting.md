@@ -7,26 +7,52 @@ intended looks much like a malfunction from the outside. This is not an
 on-call runbook: Muninn is a portfolio/reference implementation, not an
 operated production service.
 
+## A local build silently doesn't run - the deployed Pod is the published image instead
+
+**Symptom:** `make deploy` succeeds, the Pod reaches `1/1 Running`, but
+it's running the real published `ghcr.io/garoze/muninn:latest` instead of
+a local change - no error anywhere, just code that looks unchanged.
+
+**Cause:** `latest` is the one tag Kubernetes defaults to
+`imagePullPolicy: Always` for; every other tag defaults to
+`IfNotPresent`. `IMG` defaults to `ghcr.io/garoze/muninn:latest` (the
+real published image), so `make image load deploy` run without an `IMG`
+override builds and loads a local image under that tag, then `deploy`'s
+`Always` default re-pulls the real one from GHCR anyway - the local
+build was never used, and nothing about that failure is visible; the Pod
+just starts normally.
+
+**Fix:** Always pass a distinct, non-`latest` `IMG` for local testing,
+consistently across all three steps:
+
+```bash
+make image load IMG=ghcr.io/garoze/muninn:local
+make deploy IMG=ghcr.io/garoze/muninn:local
+```
+
+A non-`latest` tag's `IfNotPresent` default means the Pod uses what was
+just loaded rather than reaching out to the registry at all. The
+end-to-end test (`make test-e2e`) already does this consistently via a
+package-level `localImage` constant - `runMake` always receives the same
+`IMG=` override for `image`/`deploy`/`deploy-webhook`, precisely so this
+class of mismatch can't happen silently there either.
+
 ## Pod stuck with `ErrImageNeverPull`
 
-**Symptom:** After `make deploy`, `kubectl get pods -n muninn-system`
-shows the pod stuck in `ErrImageNeverPull` instead of reaching
-`1/1 Running`.
+**Symptom:** After `make deploy IMG=<tag>`, `kubectl get pods -n
+muninn-system` shows the pod stuck in `ErrImagePull`/`ImagePullBackOff`
+rather than reaching `1/1 Running`.
 
-**Cause:** The Deployment manifest uses `imagePullPolicy: Never`, which
-requires an exact string match against whatever image reference is
-already in the node's containerd store. `make load` tags the image with
-a `localhost/` prefix before importing it (Podman applies this prefix to
-local images automatically; Docker doesn't, so the tag is added
-explicitly to keep the reference identical either way). If the image
-was built or loaded through a different path than `make image`/`make
-load`, the reference in containerd's store may not match what the
-manifest expects.
+**Cause:** The `IMG` value passed to `deploy` doesn't match what was
+actually loaded via `make image load` - a typo, or `image`/`load` run
+with one `IMG` and `deploy` with another. With a non-`latest` tag's
+`IfNotPresent` default, a missing local image means the kubelet falls
+back to pulling from the registry, which fails outright for a tag that
+was never pushed anywhere (like a local-only `:local` build).
 
-**Fix:** Run `make image load` (in that order) and confirm the image
-exists in containerd's store before re-running `make deploy`. This
-failure mode is also detected and reported explicitly by the end-to-end
-test (`make test-e2e`) rather than surfacing as an unrelated timeout.
+**Fix:** Confirm the exact same `IMG` value was used for `image`, `load`,
+and `deploy`, and that `make load`'s import actually succeeded (check
+`sudo k3s ctr -n k8s.io images list | grep muninn`).
 
 ## Killing a locally-run process doesn't stop it
 

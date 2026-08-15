@@ -10,10 +10,12 @@ PROTO_SRC   := $(PROTO_DIR)/v1
 
 .DEFAULT_GOAL := help
 
-PROTOC          ?= protoc
-IMG             ?= muninn:latest
-KUBECONFIG      ?= $(HOME)/.kube/config
-CONTAINER_ENGINE ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+PROTOC     ?= protoc
+IMG        ?= ghcr.io/garoze/muninn:latest
+IMG_REPO   := $(firstword $(subst :, ,$(IMG)))
+IMG_TAG    := $(word 2,$(subst :, ,$(IMG)))
+KUBECONFIG ?= $(HOME)/.kube/config
+KUSTOMIZE  ?= kustomize
 
 NAMESPACE ?=
 KEYS      ?=
@@ -95,17 +97,25 @@ test-e2e: ## End-to-end against a cluster you already have
 test-e2e-csi: ## End-to-end CSI secret delivery on a disposable kind cluster
 	MUNINN_IT_CSI_E2E=1 go test ./test/e2e/... -run TestCSIE2E -v -timeout 15m -count=1
 
-# override the detected engine with: make image CONTAINER_ENGINE=docker
-image: ## Build the container image
-	$(CONTAINER_ENGINE) build -t $(IMG) .
+# builds for the host's own platform and writes a tarball rather than
+# pushing - --tags/--bare together are verified working despite ko's own
+# help text warning they may not be; see .ko.yaml for the pinned base image
+# and the three OCI labels' rationale
+image: ## Build the container image (via ko) into bin/image.tar
+	@mkdir -p $(BIN_DIR)
+	KO_DOCKER_REPO=$(IMG_REPO) VERSION=$(VERSION) \
+	ko build ./$(CMD_DIR)/$(MANAGER_BIN) --tarball=$(BIN_DIR)/image.tar --push=false --bare --sbom=none \
+		--platform=$(shell go env GOOS)/$(shell go env GOARCH) --tags=$(IMG_TAG) \
+		--image-label org.opencontainers.image.source=https://github.com/Garoze/Muninn \
+		--image-label org.opencontainers.image.description="Kubernetes-native runtime configuration resolver" \
+		--image-label org.opencontainers.image.licenses=MIT
 
-# import the built image into the local k3s node's containerd store. Tag
-# with an explicit localhost/ prefix first so config/manager/deployment.yaml's
-# image reference matches regardless of which engine built it — Podman
-# applies this prefix to local images automatically, Docker does not.
+# import the built image into the local k3s node's containerd store, in the
+# k8s.io namespace specifically - the kubelet/CRI never looks at ctr's
+# default namespace, so importing without -n k8s.io leaves the image
+# invisible to Pods despite `ctr images list` showing it
 load: ## Import the image into the local k3s containerd store
-	$(CONTAINER_ENGINE) tag $(IMG) localhost/$(IMG)
-	$(CONTAINER_ENGINE) save localhost/$(IMG) | sudo k3s ctr images import -
+	sudo k3s ctr -n k8s.io images import $(BIN_DIR)/image.tar
 
 # apply the sample Namespace and ConfigMap to the cluster
 sample: ## Apply the sample Namespace and labeled ConfigMap
@@ -145,7 +155,8 @@ deploy: ## Apply the resolver in-cluster
 	kubectl apply -f $(RBAC_DIR)/service_account.yaml
 	kubectl apply -f $(RBAC_DIR)/role.yaml
 	kubectl apply -f $(RBAC_DIR)/role_binding.yaml
-	kubectl apply -f $(MANAGER_DIR)/deployment.yaml
+	cd $(MANAGER_DIR) && $(KUSTOMIZE) edit set image $(IMG_REPO)=$(IMG)
+	kubectl apply -k $(MANAGER_DIR)
 	kubectl apply -f $(MANAGER_DIR)/service.yaml
 
 # tear down everything `make deploy` created (reverse order; the namespace
@@ -154,7 +165,7 @@ deploy: ## Apply the resolver in-cluster
 # cascade — from being left behind)
 undeploy: ## Tear down the resolver
 	kubectl delete -f $(MANAGER_DIR)/service.yaml --ignore-not-found
-	kubectl delete -f $(MANAGER_DIR)/deployment.yaml --ignore-not-found
+	kubectl delete -k $(MANAGER_DIR) --ignore-not-found
 	kubectl delete -f $(RBAC_DIR)/role_binding.yaml --ignore-not-found
 	kubectl delete -f $(RBAC_DIR)/role.yaml --ignore-not-found
 	kubectl delete -f $(RBAC_DIR)/service_account.yaml --ignore-not-found
@@ -185,7 +196,8 @@ deploy-webhook: ## Apply the mutating admission webhook
 	kubectl apply -f $(WEBHOOK_DIR)/role_spc_writer.yaml
 	kubectl apply -f $(WEBHOOK_DIR)/role_spc_writer_binding.yaml
 	kubectl apply -f $(WEBHOOK_DIR)/service.yaml
-	kubectl apply -f $(WEBHOOK_DIR)/deployment.yaml
+	cd $(WEBHOOK_DIR) && $(KUSTOMIZE) edit set image $(IMG_REPO)=$(IMG)
+	kubectl apply -k $(WEBHOOK_DIR)
 	kubectl apply -f $(WEBHOOK_DIR)/webhook.yaml
 
 # tear down everything `make deploy-webhook` created (reverse order; the
@@ -193,7 +205,7 @@ deploy-webhook: ## Apply the mutating admission webhook
 # admission requests here before the backend disappears)
 undeploy-webhook: ## Tear down the mutating admission webhook
 	kubectl delete -f $(WEBHOOK_DIR)/webhook.yaml --ignore-not-found
-	kubectl delete -f $(WEBHOOK_DIR)/deployment.yaml --ignore-not-found
+	kubectl delete -k $(WEBHOOK_DIR) --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/service.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/role_spc_writer_binding.yaml --ignore-not-found
 	kubectl delete -f $(WEBHOOK_DIR)/role_spc_writer.yaml --ignore-not-found

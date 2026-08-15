@@ -1,0 +1,12 @@
+defaultBaseImage: gcr.io/distroless/static@sha256:23795be0fe67b7d47d1ee62b19c7db750152db627d5bbfa31307e892a7575bec
+defaultPlatforms:
+  - linux/amd64
+  - linux/arm64
+builds:
+  - id: muninn
+    dir: .
+    main: ./cmd/muninn
+    ldflags:
+      - -s
+      - -w
+      - -X github.com/garoze/muninn/internal/version.Version={{.Env.VERSION}}

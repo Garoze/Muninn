@@ -1,8 +1,9 @@
+{{- if .Values.webhook.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: muninn-webhook
-  namespace: muninn-system
+  namespace: {{ .Release.Namespace }}
   labels:
     app: muninn-webhook
 spec:
@@ -22,10 +23,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: muninn-webhook
-          # NOTE: must match config/manager/deployment.yaml's image by hand -
-          # kubectl apply -f treats the two files independently, so nothing
-          # keeps this in sync automatically.
-          image: ghcr.io/garoze/muninn:latest
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           args: ["webhook"]
           ports:
             - name: https
@@ -33,15 +31,17 @@ spec:
               protocol: TCP
           env:
             - name: MUNINN_INJECT_IMAGE
-              value: ghcr.io/garoze/muninn:latest
+              value: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
             - name: MUNINN_SELF_ADDR
-              value: muninn.muninn-system.svc.cluster.local:5010
+              value: muninn.{{ .Release.Namespace }}.svc.cluster.local:5010
+            {{- if .Values.secrets.enabled }}
             - name: SECRET_SPC_MODE
-              value: Create
+              value: {{ .Values.secrets.spcMode }}
             - name: VAULT_ADDRESS
-              value: http://vault.kube-system:8200
+              value: {{ .Values.secrets.vault.address }}
             - name: VAULT_ROLE_NAME
-              value: muninn
+              value: {{ .Values.secrets.vault.roleName }}
+            {{- end }}
           # Probes speak HTTPS because the webhook serves nothing else; the
           # kubelet does not verify the certificate for probes.
           livenessProbe:
@@ -82,4 +82,5 @@ spec:
       volumes:
         - name: webhook-tls
           secret:
-            secretName: muninn-webhook-tls
+            secretName: {{ .Values.certificate.secretName }}
+{{- end }}
