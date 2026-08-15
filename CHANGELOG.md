@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.1.0-alpha.3](https://github.com/Garoze/Muninn/compare/v0.1.0-alpha.2...v0.1.0-alpha.3) (2026-08-15)
+
+
+### Features
+
+* **chart:** add helm-unittest, kubeconform, and ct lint to CI ([dce9ad7](https://github.com/Garoze/Muninn/commit/dce9ad70393520b9bd2a4f70d330b6a995823297))
+* **chart:** add opt-in cert-manager/CSI-driver dependencies and a webhook enable toggle ([0fbca89](https://github.com/Garoze/Muninn/commit/0fbca89e2f38a9026dbc8122e9dc5cc409a92456))
+* **chart:** add the Helm chart's mechanical translation and core values ([cf493a6](https://github.com/Garoze/Muninn/commit/cf493a6928d238854f4b5a7ea3940920934bbc79))
+* **ci:** add a nightly workflow installing the published chart and image ([5a51a12](https://github.com/Garoze/Muninn/commit/5a51a120d6ad49a5da141d07c6c99d73fd72dfda))
+* **ci:** publish and sign the Helm chart alongside the image ([ec04507](https://github.com/Garoze/Muninn/commit/ec045077ee75ae73af312b4e3c2c313f666194f7))
+
+
+### Bug Fixes
+
+* **ci:** install helm explicitly before chart-testing-action ([2233071](https://github.com/Garoze/Muninn/commit/2233071b7a97a9753e575cbbbf2eedae82b4f4bc))
+* **ci:** register subchart repositories and fetch dependencies ([9deb7ca](https://github.com/Garoze/Muninn/commit/9deb7ca589e4c3e832b4f479a6b943771acdf6d8))
+* **ci:** resync develop's release-please manifest after an official cut ([99b5ffa](https://github.com/Garoze/Muninn/commit/99b5ffaff4ca145ff6f99de6e1d675ddbaa306be))
+
+
+### Documentation
+
+* **testing:** document the nightly tier ([cb1e651](https://github.com/Garoze/Muninn/commit/cb1e6516b6a64b335693d376604a8617313ab269))
+
 ## [0.1.0-alpha.2](https://github.com/Garoze/Muninn/compare/v0.1.0-alpha.1...v0.1.0-alpha.2) (2026-08-15)
 
 
