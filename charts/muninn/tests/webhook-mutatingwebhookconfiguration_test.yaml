@@ -1,0 +1,67 @@
+suite: webhook-mutatingwebhookconfiguration
+templates:
+  - webhook-mutatingwebhookconfiguration.yaml
+release:
+  namespace: muninn-system
+tests:
+  - it: renders nothing when the webhook is disabled
+    set:
+      webhook.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: excludes kube-system and the default release namespace
+    asserts:
+      - equal:
+          path: webhooks[0].namespaceSelector.matchExpressions[0].values
+          value: ["kube-system", "muninn-system"]
+
+  - it: excludes the actual release namespace when installed elsewhere
+    release:
+      namespace: platform-system
+    asserts:
+      - equal:
+          path: webhooks[0].namespaceSelector.matchExpressions[0].values
+          value: ["kube-system", "platform-system"]
+
+  - it: unions operator-supplied excludedNamespaces without dropping the required two
+    set:
+      webhook.excludedNamespaces: ["ci"]
+    asserts:
+      - equal:
+          path: webhooks[0].namespaceSelector.matchExpressions[0].values
+          value: ["kube-system", "muninn-system", "ci"]
+
+  - it: cert-manager mode annotates inject-ca-from and sets no inline caBundle
+    asserts:
+      - equal:
+          path: metadata.annotations["cert-manager.io/inject-ca-from"]
+          value: muninn-system/muninn-webhook-cert
+      - notExists:
+          path: webhooks[0].clientConfig.caBundle
+
+  - it: self-signed mode sets an inline caBundle and no cert-manager annotation
+    set:
+      certificate.mode: self-signed
+    asserts:
+      - notExists:
+          path: metadata.annotations
+      - isNotEmpty:
+          path: webhooks[0].clientConfig.caBundle
+
+  - it: provided mode passes through the operator-supplied caBundle
+    set:
+      certificate.mode: provided
+      certificate.provided.caBundle: dGVzdC1jYS1idW5kbGU=
+    asserts:
+      - equal:
+          path: webhooks[0].clientConfig.caBundle
+          value: dGVzdC1jYS1idW5kbGU=
+
+  - it: provided mode fails the render when caBundle is unset
+    set:
+      certificate.mode: provided
+    asserts:
+      - failedTemplate:
+          errorMessage: certificate.provided.caBundle is required when certificate.mode is "provided"
