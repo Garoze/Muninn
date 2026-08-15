@@ -105,11 +105,11 @@ Optional dependencies, which Muninn does not install:
 
 | Dependency | Required for |
 |---|---|
-| [cert-manager](https://cert-manager.io/) | `make deploy-webhook` |
+| [cert-manager](https://cert-manager.io/) | The webhook's default certificate mode |
 | [`secrets-store-csi-driver`](https://secrets-store-csi-driver.sigs.k8s.io/) and [Vault](https://www.vaultproject.io/) | [Secret references](#secret-references) |
 | [`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest) | `make test-integration` |
 | [`grpcurl`](https://github.com/fullstorydev/grpcurl) | Calling the API without `muninnctl` |
-| [`helm`](https://helm.sh/) | `make test-integration`, `make test-e2e`, `make test-e2e-csi` |
+| [`helm`](https://helm.sh/) | `make deploy`, `make test-integration`, `make test-e2e`, `make test-e2e-csi` |
 | [`kind`](https://kind.sigs.k8s.io/) and a container engine | `make test-e2e-csi` |
 
 ### Run it

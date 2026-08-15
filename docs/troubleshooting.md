@@ -33,11 +33,11 @@ make deploy IMG=ghcr.io/garoze/muninn:local
 A non-`latest` tag's `IfNotPresent` default means the Pod uses what was
 just loaded rather than reaching out to the registry at all. The
 end-to-end test (`make test-e2e`) already does this consistently via a
-package-level `localImage` constant - `runMake` always receives the same
-`IMG=` override for `image`/`deploy`/`deploy-webhook`, precisely so this
-class of mismatch can't happen silently there either.
+package-level constant, used both to build the image and to set the chart's
+image values, precisely so this class of mismatch can't happen silently
+there either.
 
-## Pod stuck with `ErrImageNeverPull`
+## Pod stuck with `ErrImagePull`
 
 **Symptom:** After `make deploy IMG=<tag>`, `kubectl get pods -n
 muninn-system` shows the pod stuck in `ErrImagePull`/`ImagePullBackOff`
@@ -163,8 +163,8 @@ of `patch` fails on every apply, including the first. Unit tests cannot
 catch this: controller-runtime's fake client does not enforce RBAC at
 all.
 
-**Fix:** Apply `config/webhook/role_spc_writer.yaml` and its binding,
-which `make deploy-webhook` does in order. The integration tier covers
+**Fix:** Install with `secrets.enabled=true` and `secrets.spcMode=Create`,
+which is what renders that role and its binding. The integration tier covers
 both directions of this against an RBAC-enforcing API server, so
 `make test-integration` reproduces it without a cluster.
 
