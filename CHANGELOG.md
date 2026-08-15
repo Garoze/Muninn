@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.0-alpha.4](https://github.com/Garoze/Muninn/compare/v0.1.0-alpha.3...v0.1.0-alpha.4) (2026-08-15)
+
+
+### Documentation
+
+* add the published chart to the README quick start ([a187a28](https://github.com/Garoze/Muninn/commit/a187a28b350a576b0eaaeb4d269f771982b0bd0e))
+
 ## [0.1.0-alpha.3](https://github.com/Garoze/Muninn/compare/v0.1.0-alpha.2...v0.1.0-alpha.3) (2026-08-15)
 
 
