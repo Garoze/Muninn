@@ -8,9 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
-	"sync"
 	"testing"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -28,6 +26,7 @@ import (
 	"github.com/garoze/muninn/internal/config"
 	kubeModule "github.com/garoze/muninn/internal/kube"
 	webhookModule "github.com/garoze/muninn/internal/webhook"
+	"github.com/garoze/muninn/test/chartutil"
 )
 
 // secretsStoreCRDDir locates config/crd/bases inside the
@@ -66,18 +65,6 @@ func secretsStoreCRDDir(t *testing.T) string {
 // case below therefore selects its RBAC by setting the value a user would
 // set, and lets a real API server decide the outcome.
 
-var chartDepsOnce sync.Once
-
-// chartPath resolves the chart relative to this test file.
-func chartPath(t *testing.T) string {
-	t.Helper()
-	_, thisFile, _, ok := goruntime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "charts", "muninn")
-}
-
 // renderChartRBAC renders the chart with sets applied and returns every
 // ServiceAccount, ClusterRole and ClusterRoleBinding in the output. The
 // remaining kinds are dropped: the namespaces are created separately, and
@@ -86,19 +73,9 @@ func chartPath(t *testing.T) string {
 func renderChartRBAC(t *testing.T, sets ...string) []*unstructured.Unstructured {
 	t.Helper()
 
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm not found in PATH, required to render the chart's RBAC")
-	}
-	// Helm refuses to render a chart whose declared dependencies are missing
-	// from disk even when every one of them is condition-disabled, as they
-	// are here, and those archives are gitignored.
-	chartDepsOnce.Do(func() {
-		if out, err := exec.Command("helm", "dependency", "build", chartPath(t)).CombinedOutput(); err != nil {
-			t.Fatalf("helm dependency build: %v\n%s", err, out)
-		}
-	})
+	chartutil.EnsureDependencies(t)
 
-	args := []string{"template", "muninn", chartPath(t), "--namespace", "muninn-system"}
+	args := []string{"template", "muninn", chartutil.Path(t), "--namespace", "muninn-system"}
 	for _, s := range sets {
 		args = append(args, "--set", s)
 	}
