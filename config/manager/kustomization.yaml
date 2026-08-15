@@ -1,0 +1,5 @@
+resources:
+  - deployment.yaml
+images:
+  - name: ghcr.io/garoze/muninn
+    newTag: latest

@@ -46,8 +46,8 @@ make test-integration
 ## End-to-end
 
 ```bash
-make image load         # `make load` requires interactive sudo
-make test-e2e           # against an existing cluster
+make image load IMG=ghcr.io/garoze/muninn:local   # `make load` requires interactive sudo
+make test-e2e                                      # against an existing cluster
 
 make test-e2e-csi       # provisions a disposable kind cluster, then removes it
 ```

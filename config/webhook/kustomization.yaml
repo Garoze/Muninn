@@ -1,0 +1,20 @@
+resources:
+  - deployment.yaml
+images:
+  - name: ghcr.io/garoze/muninn
+    newTag: latest
+# MUNINN_INJECT_IMAGE must match this Deployment's own image - it's stamped
+# onto the containers the webhook injects into other Pods. The images
+# transformer above only rewrites the container's own `image` field, so this
+# copies that already-rewritten value into the env var afterward.
+replacements:
+  - source:
+      kind: Deployment
+      name: muninn-webhook
+      fieldPath: spec.template.spec.containers.[name=muninn-webhook].image
+    targets:
+      - select:
+          kind: Deployment
+          name: muninn-webhook
+        fieldPaths:
+          - spec.template.spec.containers.[name=muninn-webhook].env.[name=MUNINN_INJECT_IMAGE].value

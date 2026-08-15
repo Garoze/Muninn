@@ -36,7 +36,7 @@ func TestCSIE2E(t *testing.T) {
 	if os.Getenv("MUNINN_IT_CSI_E2E") != "1" {
 		t.Skip("set MUNINN_IT_CSI_E2E=1 to run the CSI secret-delivery e2e test")
 	}
-	for _, bin := range []string{"kind", "podman", "helm", "kubectl"} {
+	for _, bin := range []string{"kind", "helm", "kubectl"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not found in PATH, required for this test", bin)
 		}
@@ -115,20 +115,20 @@ EOF
 	}
 
 	// --- build and load Muninn's image ---
-	runMake(t, repoRoot, "image")
-	loadImageIntoKind(t, csiClusterName)
+	runMake(t, repoRoot, "image", "IMG="+localImage)
+	loadImageIntoKind(t, repoRoot, csiClusterName)
 
 	// --- cert-manager, then serve + webhook, pointed at this Vault ---
 	runCmd(t, "", env, "kubectl", "apply", "-f", "https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml")
 	waitAllPodsReady(t, k8sClient, "cert-manager", 120*time.Second)
 
-	runCmd(t, repoRoot, env, "make", "deploy")
+	runCmd(t, repoRoot, env, "make", "deploy", "IMG="+localImage)
 	t.Cleanup(func() { runCmd(t, repoRoot, env, "make", "undeploy") })
 	if podName := waitForPodReady(t, k8sClient, deployNamespace, 90*time.Second, deployAppLabels); podName == "" {
 		t.Fatal("muninn (serve) pod never reached Ready")
 	}
 
-	runCmd(t, repoRoot, env, "make", "deploy-webhook")
+	runCmd(t, repoRoot, env, "make", "deploy-webhook", "IMG="+localImage)
 	t.Cleanup(func() { runCmd(t, repoRoot, env, "make", "undeploy-webhook") })
 	if podName := waitForPodReady(t, k8sClient, deployNamespace, 90*time.Second, webhookAppLabels); podName == "" {
 		t.Fatal("muninn-webhook pod never reached Ready")
@@ -291,14 +291,12 @@ func runCmd(t *testing.T, dir string, env []string, name string, args ...string)
 	}
 }
 
-// loadImageIntoKind loads the already-built localhost/muninn:latest podman
-// image into clusterName, bypassing kind's own (docker-only)
-// `load docker-image` - this machine builds with podman, whose image store
-// docker-image can't read from.
-func loadImageIntoKind(t *testing.T, clusterName string) {
+// loadImageIntoKind loads the tarball `make image` already produced
+// (bin/image.tar - ko's own output, not a container-engine save) into
+// clusterName via kind's image-archive loader.
+func loadImageIntoKind(t *testing.T, repoRoot, clusterName string) {
 	t.Helper()
-	tarPath := t.TempDir() + "/muninn.tar"
-	runCmd(t, "", nil, "podman", "save", "-o", tarPath, "localhost/muninn:latest")
+	tarPath := filepath.Join(repoRoot, "bin", "image.tar")
 	runCmd(t, "", nil, "kind", "load", "image-archive", tarPath, "--name", clusterName)
 }
 
