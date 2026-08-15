@@ -40,7 +40,7 @@
 
 * update build/deploy docs and troubleshooting for ko ([d56eedc](https://github.com/Garoze/Muninn/commit/d56eedce9ff895abca9f059057d334e5b6f9de4b))
 
-## 0.1.0-alpha.1 (2026-08-15)
+## 0.2.0 (2026-08-15)
 
 Initial release. Muninn watches labeled ConfigMaps behind a pluggable
 `ConfigSource` interface, merges them into a namespace-scoped in-memory
