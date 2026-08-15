@@ -16,8 +16,8 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      # A direct tag push and a dispatch from release-please/cut-release both
-      # land here - inputs.tag is only set on the latter
+      # inputs.tag is only set when this workflow is dispatched explicitly,
+      # not on a direct tag push
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref_name }}
