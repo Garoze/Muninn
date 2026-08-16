@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2-alpha.4](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.3...v0.2.2-alpha.4) (2026-08-16)
+
+
+### Bug Fixes
+
+* **ci:** verify each attestation with the tool that can read it ([6a5a9a8](https://github.com/Garoze/Muninn/commit/6a5a9a8afdde2c5d233364ccf9579ec1bdbefa39))
+
 ## [0.2.2-alpha.3](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.2...v0.2.2-alpha.3) (2026-08-16)
 
 
