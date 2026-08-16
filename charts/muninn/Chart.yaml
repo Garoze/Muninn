@@ -2,8 +2,14 @@ apiVersion: v2
 name: muninn
 description: Kubernetes-native runtime configuration resolver
 type: application
-version: 0.2.0
-appVersion: "0.1.0"
+# Bumped whenever anything under charts/ changes, independently of the
+# application's own version below.
+version: 0.2.1
+# The application version this chart deploys by default. Stamped at package
+# time from the release being published, so a published chart always states
+# the release it shipped with; the value here is the fallback for a chart
+# built straight from the working tree.
+appVersion: "0.2.2"
 # livenessProbe.grpc (both Deployments) went GA in 1.27; the -0 suffix
 # matters - without it, prerelease-shaped version strings from managed
 # distributions fail the constraint for no good reason.

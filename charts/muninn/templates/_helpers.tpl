@@ -25,3 +25,28 @@ fine, since nothing there is actually applied to a cluster.
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{/*
+The image reference every container in this chart runs.
+
+A tag alone is what an ordinary install wants and what the default gives.
+A digest is what a consumer who verified a specific artifact wants, since
+a tag can be moved to point at something else after it was checked - see
+docs/verification.md. Both together is the useful combination rather than
+a contradiction: the digest is what resolves, and the tag survives as the
+human-readable part of the reference.
+
+Precedence follows cert-manager's helper of the same purpose, which is
+the convention consumers of a Kubernetes chart already expect.
+*/}}
+{{- define "muninn.image" -}}
+{{- $image := .Values.image -}}
+{{- $image.repository -}}
+{{- if and $image.tag $image.digest -}}
+{{- printf ":%s@%s" $image.tag $image.digest -}}
+{{- else if $image.tag -}}
+{{- printf ":%s" $image.tag -}}
+{{- else if $image.digest -}}
+{{- printf "@%s" $image.digest -}}
+{{- end -}}
+{{- end }}

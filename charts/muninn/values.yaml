@@ -1,6 +1,13 @@
 image:
   repository: ghcr.io/garoze/muninn
   tag: latest
+  # Set this to deploy the exact artifact that was verified. A tag can be
+  # moved to point at different content after it was checked, and the
+  # default here is the floating one - so a consumer who verified a digest
+  # and then installed by tag has verified something other than what runs.
+  # Set alongside the tag rather than instead of it: the digest resolves,
+  # the tag stays readable. See docs/verification.md.
+  digest: ""
 
 webhook:
   # Gates every webhook-* template, including the Certificate/Issuer -
