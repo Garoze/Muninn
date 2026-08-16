@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2-alpha.3](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.2...v0.2.2-alpha.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **ci:** stop the provenance step destroying the SBOM attestation ([1a7c8e9](https://github.com/Garoze/Muninn/commit/1a7c8e97542be5a09fcf62a1e8cfe4d3800b587f))
+
 ## [0.2.2-alpha.2](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.1...v0.2.2-alpha.2) (2026-08-16)
 
 
