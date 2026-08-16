@@ -675,8 +675,9 @@ A reference is a configuration key carrying a fixed suffix, whose value
 is a URI naming where the real secret lives. Two optional companion keys
 sharing the same prefix complete the convention: one names the field to
 extract from within that secret, and one records the path the value will
-be mounted at, for the consumer's own documentation. Only the reference
-itself is interpreted.
+be mounted at, for the consumer's own documentation. The reference and the
+field selector are both interpreted, since the driver needs each to fetch
+the right value; the mount-path key is documentation and is never read.
 
 **Motivation:** The value never transits or rests inside this system, so
 no part of it needs to be trusted with secret material or capable of

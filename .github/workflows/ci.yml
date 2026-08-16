@@ -143,11 +143,10 @@ jobs:
           git diff --exit-code -- charts/muninn/README.md
       - name: install kubeconform
         run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
-      # ct lint's own dependency build needs these repos registered with
-      # helm directly - "helm dependency build" alone (used below for
-      # kubeconform) resolves repository URLs from Chart.yaml without this,
-      # but ct shells out to a plain "helm dependency build" that expects
-      # the repo already known to helm's local config.
+      # Both steps below need these: "helm dependency build" resolves a
+      # dependency only through helm's registered repository list, unlike
+      # "helm dependency update", which reads the URLs straight from
+      # Chart.yaml. ct shells out to the former, and so does the step here.
       - name: register subchart repositories
         run: |
           helm repo add jetstack https://charts.jetstack.io
