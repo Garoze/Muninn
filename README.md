@@ -111,6 +111,8 @@ Optional dependencies, which Muninn does not install:
 | [`grpcurl`](https://github.com/fullstorydev/grpcurl) | Calling the API without `muninnctl` |
 | [`helm`](https://helm.sh/) | `make deploy`, `make test-integration`, `make test-e2e`, `make test-e2e-csi` |
 | [`kind`](https://kind.sigs.k8s.io/) and a container engine | `make test-e2e-csi` |
+| [`cosign`](https://github.com/sigstore/cosign), [`crane`](https://github.com/google/go-containerregistry), [`gh`](https://cli.github.com/) and `jq` | [Verifying published artifacts](docs/verification.md) |
+| [`ko`](https://ko.build/) | `make image` |
 
 ### Run it
 
@@ -258,7 +260,9 @@ rationale, and Architecture Decision Records.
 
 Muninn is a portfolio project and reference implementation, not an operated
 service. It has not been deployed in production, does not provide API
-stability guarantees, and has no formal release or support process. Its design
+stability guarantees, and offers no support. Releases are automated, signed
+and documented in [CONTRIBUTING.md](CONTRIBUTING.md), which is a property of
+the pipeline rather than a commitment to anyone. Its design
 is based on patterns used in a production platform, generalized so that it
 does not depend on that platform or its environment.
 

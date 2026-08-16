@@ -21,8 +21,8 @@ than at the prerequisite that is actually missing.
 ## Decision
 
 Both ship as declared dependencies of the chart, conditional on a value,
-and both default to off. The common case — a cluster where these already
-exist, managed independently — installs nothing extra and inherits
+and both default to off. The common case - a cluster where these already
+exist, managed independently - installs nothing extra and inherits
 nothing. A cluster that has neither can turn them on and get a working
 installation from one source.
 
@@ -53,7 +53,7 @@ owning the collision problem.
 
 A fresh install that enables them needs two passes. The certificate
 manager's own admission webhook has to be serving before a certificate
-request is admitted, and a single pass submits both at once — so the
+request is admitted, and a single pass submits both at once - so the
 first pass installs the dependency with this project's webhook disabled,
 and the second enables it. This is inherent to admission-time validation,
 not to how the dependency is packaged.

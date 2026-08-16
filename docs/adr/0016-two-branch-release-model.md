@@ -22,7 +22,7 @@ Two long-lived branches, each with one job.
 Every change enters through the staging branch. Merging there updates a
 release pull request holding the next prerelease version and its
 changelog entry; merging *that* tags a prerelease, which publishes an
-image and a chart, signs both, and attests the image — the entire release
+image and a chart, signs both, and attests the image - the entire release
 path, on every batch of merged work.
 
 The release branch holds only official releases. Cutting one is a
@@ -73,8 +73,8 @@ decision:
 - The automation that does the merging had its own defect: a
   staging-to-release merge leaves the release branch strictly ahead, so
   the merge back fast-forwards and produces nothing to commit.
-- The changelog diverges by design — staging accumulates one entry per
-  prerelease, the release branch consolidates them — so the conflict is
+- The changelog diverges by design - staging accumulates one entry per
+  prerelease, the release branch consolidates them - so the conflict is
   guaranteed on every merge back and needs its own resolution rule.
 - The release automation's version manifest is authoritative on staging
   and inherited stale on the release branch, which had to be corrected
@@ -91,8 +91,8 @@ of them.
 Two prerelease version shapes exist, and both must be handled everywhere
 a version is inspected: the first prerelease after a release carries no
 increment, and later ones do. Assuming the incremented shape has been
-wrong twice — once where the floating tag was withheld, once where the
-changelog was consolidated — which is why both now test for an official
+wrong twice - once where the floating tag was withheld, once where the
+changelog was consolidated - which is why both now test for an official
 release positively rather than excluding prereleases by name.
 
 Anything that changes release tooling has to be considered on both

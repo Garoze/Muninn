@@ -21,8 +21,8 @@ The webhook runs as a mode of the same binary as the gRPC resolver,
 selected via a subcommand (`serve` for the resolver, `webhook` for the
 admission webhook), rather than as an entirely separate binary released
 and versioned independently. The two modes are still deployed as
-separate processes: separate Deployments, separate images built from the
-same source, separate probes and ports, so the differing availability
+separate processes: separate Deployments running the same image, separate
+probes and ports, so the differing availability
 profile above is preserved at the deployment level even though the
 source and release artifact are shared.
 

@@ -43,7 +43,7 @@ Rendering the chart puts `helm` on this tier's prerequisites; without it those
 tests skip.
 
 ```bash
-go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.24.1
 export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)
 make test-integration
 ```
@@ -98,14 +98,15 @@ Two cells: cert-manager already present externally (the common case), and a
 bare cluster exercising the two-phase install the opt-in `cert-manager`/
 `secrets-store-csi-driver` subcharts require. Both install into a
 non-default namespace and delete the webhook Pod, confirming the
-replacement schedules — the case where a hardcoded namespace exclusion in
+replacement schedules - the case where a hardcoded namespace exclusion in
 the `MutatingWebhookConfiguration` would silently fail under
 `failurePolicy: Fail`.
 
 Not yet covered: the wider Kubernetes-version/cert-mode/secrets matrix, and
-upgrading a previously published chart version into the current one — the
-latter has no versioned install path to upgrade *from* until a second real
-chart version is published.
+upgrading a previously published chart version into the current one. Several
+chart versions are published now, so the upgrade case is testable - and it is
+the only route to the self-signed certificate mode's rotation hazard, which
+no tier reaches today.
 
 ## Verified manually
 

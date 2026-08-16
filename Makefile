@@ -33,7 +33,7 @@ LDFLAGS := -X $(MODULE)/internal/version.Version=$(VERSION)
 
 .PHONY: help test test-unit test-integration test-e2e test-e2e-csi build image \
 	load lint fmt vet tidy proto sample sample-events run query describe \
-	chart-deps deploy undeploy clean
+	chart-deps chart-docs deploy undeploy clean
 
 # regenerate Go code (message types + gRPC stubs) from proto/v1/*.proto
 # requires: protoc, protoc-gen-go, protoc-gen-go-grpc on $PATH
@@ -90,8 +90,8 @@ test-integration: ## Integration tests against a throwaway control plane
 
 # installs the chart against your real cluster and exercises it over a
 # port-forward. Requires the image already built and loaded
-# (`make image load` — not run automatically here, since `load` needs
-# interactive sudo). Not part of `make test` or CI — see docs/design.md.
+# (`make image load` - not run automatically here, since `load` needs
+# interactive sudo). Not part of `make test` or CI - see docs/design.md.
 test-e2e: ## End-to-end against a cluster you already have
 	MUNINN_IT_E2E=1 go test ./test/e2e/... -run TestE2E -v -timeout 8m -count=1
 

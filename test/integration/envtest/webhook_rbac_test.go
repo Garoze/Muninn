@@ -53,7 +53,7 @@ func secretsStoreCRDDir(t *testing.T) string {
 // client every other envtest test in this package uses. This is the class
 // of bug a fake client (internal/webhook/secretproviderclass_test.go) can
 // never catch, since RBAC isn't enforced there at all - it caught a real
-// one: role_spc_writer.yaml originally granted create/update, but
+// one: the SecretProviderClass writer role originally granted create/update, but
 // Server-Side Apply needs patch, not update; only a real API server
 // denies that.
 //

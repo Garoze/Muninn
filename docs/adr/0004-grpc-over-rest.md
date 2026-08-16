@@ -9,7 +9,8 @@ cluster, not browsers or external third parties.
 
 ## Decision
 
-Expose the API over gRPC, with a query operation and a schema-discovery
+Expose the API over gRPC, with a keys-in/keys-out query operation, a
+whole-scope resolve operation, and a schema-discovery
 operation, rather than a REST/JSON interface.
 
 ## Alternatives considered

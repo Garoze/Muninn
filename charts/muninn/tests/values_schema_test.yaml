@@ -1,0 +1,36 @@
+suite: values schema
+templates:
+  - webhook-spc-writer-rbac.yaml
+tests:
+  # Both values below are compared against a literal in a template while
+  # meaning something looser elsewhere, so a near-miss renders no error and
+  # no object. The schema is what makes the near-miss fail instead.
+  - it: rejects a certificate mode that no template gates on
+    set:
+      certificate.mode: selfsigned
+    asserts:
+      - failedTemplate:
+          errorPattern: "certificate.mode must be one of"
+
+  - it: rejects a lower-cased secret provider mode
+    set:
+      secrets.enabled: true
+      secrets.spcMode: create
+    asserts:
+      - failedTemplate:
+          errorPattern: "spcMode must be one of"
+
+  - it: rejects a malformed image digest
+    set:
+      image.digest: sha256:abc
+    asserts:
+      - failedTemplate:
+          errorPattern: "digest.*Does not match pattern|digest: Does not match"
+
+  - it: grants the SecretProviderClass write only in Create mode
+    set:
+      secrets.enabled: true
+      secrets.spcMode: Reference
+    asserts:
+      - hasDocuments:
+          count: 0

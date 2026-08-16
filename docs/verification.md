@@ -48,16 +48,16 @@ resolves to at that moment, so where the result is going to be acted on,
 resolve the digest first and verify that:
 
 ```bash
-digest=$(crane digest ghcr.io/garoze/muninn:v0.2.2)
+digest=$(crane digest ghcr.io/garoze/muninn:v0.2.3)
 cosign verify ghcr.io/garoze/muninn@"$digest" \
-  --certificate-identity "https://github.com/Garoze/Muninn/.github/workflows/publish.yml@refs/tags/v0.2.2" \
+  --certificate-identity "https://github.com/Garoze/Muninn/.github/workflows/publish.yml@refs/tags/v0.2.3" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
 ```
 
 A successful check reports which claims were validated:
 
 ```
-Verification for ghcr.io/garoze/muninn@sha256:f4c09051... --
+Verification for ghcr.io/garoze/muninn@sha256:42f1da5a... --
 The following checks were performed on each of these signatures:
   - The cosign claims were validated
   - Existence of the claims in the transparency log was verified offline
@@ -78,7 +78,7 @@ image's dependency graph:
 
 ```bash
 cosign verify-attestation --type spdxjson ghcr.io/garoze/muninn@"$digest" \
-  --certificate-identity "https://github.com/Garoze/Muninn/.github/workflows/publish.yml@refs/tags/v0.2.2" \
+  --certificate-identity "https://github.com/Garoze/Muninn/.github/workflows/publish.yml@refs/tags/v0.2.3" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" > sbom.json
 ```
 
@@ -127,7 +127,7 @@ version does not reveal. Constrain the workflow and the tag shape instead of a
 single tag:
 
 ```bash
-chart_digest=$(crane digest ghcr.io/garoze/charts/muninn:0.2.0)
+chart_digest=$(crane digest ghcr.io/garoze/charts/muninn:0.2.2)
 cosign verify ghcr.io/garoze/charts/muninn@"$chart_digest" \
   --certificate-identity-regexp "^https://github.com/Garoze/Muninn/.github/workflows/publish.yml@refs/tags/v.*" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com"

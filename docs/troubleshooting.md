@@ -254,8 +254,8 @@ the tool declines rather than producing a reassuring result.
 
 ## `cosign verify-attestation` prints its result and then hangs
 
-**Symptom:** Verification succeeds — the summary and certificate subject
-appear — and the command never exits. In a CI job this looks like a hung
+**Symptom:** Verification succeeds - the summary and certificate subject
+appear - and the command never exits. In a CI job this looks like a hung
 step long after the work finished.
 
 **Cause:** The verification summary goes to stderr, and the attestation
@@ -291,7 +291,7 @@ of the writers publishes asynchronously, the replacement arrives after
 the release has already reported success, so the artifact changes with no
 failure anywhere.
 
-**Fix:** Keep one writer per location — this project publishes provenance
+**Fix:** Keep one writer per location - this project publishes provenance
 to its attestation store rather than to the registry for exactly this
 reason. Verify published artifacts on a schedule rather than only during
 the release that produced them.
@@ -308,7 +308,7 @@ expects on the cluster rather than installing.
 
 **Fix:** Install cert-manager, or choose a certificate mode with no
 external dependency, or have the chart install cert-manager itself as an
-opt-in dependency — see
+opt-in dependency - see
 [`docs/deployment.md`](deployment.md) for the three modes and
 [ADR-0015](adr/0015-opt-in-subcharts.md) for why that dependency is off
 by default. A fresh cluster enabling it needs the two-phase install

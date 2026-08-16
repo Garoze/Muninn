@@ -917,7 +917,7 @@ are separate statements, each carried by its own attestation: a
 dependency inventory of the image, and a record naming the workflow,
 repository and commit that built it.
 
-The two attestations are deliberately stored apart — one attached to the
+The two attestations are deliberately stored apart - one attached to the
 image digest in the registry, one held in the forge's own attestation
 store. Written to the same place, the second silently replaces the first,
 and the replacement arrives after publication has already reported
@@ -931,7 +931,7 @@ about isolation between the build and the signing material rather than
 about how much the provenance says: because the build steps and the
 attestation share a job and its token, a compromised build step could in
 principle forge provenance about itself. Describing this accurately
-matters more than claiming the higher level — the claim is falsifiable in
+matters more than claiming the higher level - the claim is falsifiable in
 one question, and the honest version is the more useful answer.
 
 That reasoning is why the automation's own third-party dependencies are
@@ -960,8 +960,8 @@ policy choice on their behalf.
 Every push toward a release publishes: the same pipeline, the same
 identity, the same signing and attestation steps, on a prerelease version
 rather than an official one. That is the point rather than a side effect
-— a release path exercised only at release time is a release path nobody
-has tested — and it is what turned up every defect the first official
+- a release path exercised only at release time is a release path nobody
+has tested - and it is what turned up every defect the first official
 release would otherwise have shipped.
 
 A prerelease is a real, signed, attested artifact with a real version. It
@@ -972,7 +972,7 @@ not by excluding the prerelease shapes anyone thought to enumerate.
 Publishing continuously while keeping the default branch and the floating
 tag free of in-progress work is what the two-branch topology buys, and
 [ADR-0016](adr/0016-two-branch-release-model.md) records what it costs to
-keep those branches consistent — along with the single-branch alternative
+keep those branches consistent - along with the single-branch alternative
 that would remove that cost entirely.
 
 ---
