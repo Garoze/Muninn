@@ -78,10 +78,12 @@ func ExtractSecretRefs(resolved map[string]any, log *zap.Logger) []SecretRef {
 		}
 
 		// ObjectName becomes the mounted filename, so a key that is nothing but
-		// the suffix leaves the driver nothing to write under.
+		// the suffix leaves the driver nothing to write under, and "." or ".."
+		// name a directory rather than a file. ConfigMap key validation already
+		// excludes a separator, so those three are the whole set.
 		objectName := strings.TrimSuffix(k, RefKeySuffix)
-		if objectName == "" {
-			log.Warn("skipping secret reference with no name before the suffix",
+		if objectName == "" || objectName == "." || objectName == ".." {
+			log.Warn("skipping secret reference whose name would not be a file",
 				zap.String("key", k),
 			)
 			continue

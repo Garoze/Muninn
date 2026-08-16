@@ -89,6 +89,13 @@ needs to be trusted with, or capable of leaking, an actual secret value.
 That responsibility belongs entirely to the CSI driver and the external
 store's own access controls.
 
+What the boundary does *not* establish is authorization between
+namespaces. The role the driver authenticates as is one process-level
+value shared by every namespace, and the path it fetches is taken
+verbatim from the namespace's own configuration. The store's policy for
+that single role is therefore the whole of the isolation between one
+namespace's secrets and another's; nothing in this system narrows it.
+
 Two deployment postures follow directly from who owns that derived
 object's lifecycle: the webhook can create and keep it in sync
 automatically, or a platform team can pre-provision it and have the

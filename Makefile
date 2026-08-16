@@ -4,6 +4,10 @@ BIN_DIR     := bin
 SAMPLES_DIR := config/samples
 CHART_DIR   := charts/muninn
 HELM_DOCS_VERSION := v1.14.2
+LOCAL_REGISTRY_NAME := muninn-registry
+LOCAL_REGISTRY_PORT ?= 5000
+LOCAL_IMAGE_REPO    := localhost:$(LOCAL_REGISTRY_PORT)/muninn
+LOCAL_IMAGE_TAG     ?= e2e
 PROTO_DIR   := proto
 PROTO_SRC   := $(PROTO_DIR)/v1
 
@@ -33,7 +37,7 @@ LDFLAGS := -X $(MODULE)/internal/version.Version=$(VERSION)
 
 .PHONY: help test test-unit test-integration test-e2e test-e2e-csi build image \
 	load lint fmt vet tidy proto sample sample-events run query describe \
-	chart-deps deploy undeploy clean
+	chart-deps chart-docs deploy undeploy clean registry registry-stop push
 
 # regenerate Go code (message types + gRPC stubs) from proto/v1/*.proto
 # requires: protoc, protoc-gen-go, protoc-gen-go-grpc on $PATH
@@ -89,11 +93,12 @@ test-integration: ## Integration tests against a throwaway control plane
 	MUNINN_IT_ENVTEST=1 go test ./test/integration/envtest/... ./cmd/muninn/... -v -count=1
 
 # installs the chart against your real cluster and exercises it over a
-# port-forward. Requires the image already built and loaded
-# (`make image load` — not run automatically here, since `load` needs
-# interactive sudo). Not part of `make test` or CI — see docs/design.md.
-test-e2e: ## End-to-end against a cluster you already have
-	MUNINN_IT_E2E=1 go test ./test/e2e/... -run TestE2E -v -timeout 8m -count=1
+# port-forward. `push` builds the image into a registry the node pulls from,
+# so this needs no root; override MUNINN_E2E_IMAGE for a cluster that cannot
+# reach that registry. Not part of `make test` or CI - see docs/design.md.
+test-e2e: push ## End-to-end against a cluster you already have
+	MUNINN_IT_E2E=1 MUNINN_E2E_IMAGE=$(LOCAL_IMAGE_REPO):$(LOCAL_IMAGE_TAG) \
+	go test ./test/e2e/... -run TestE2E -v -timeout 8m -count=1
 
 # provisions its own disposable kind cluster and tears it down after -
 # unlike test-e2e, needs no existing cluster or pre-loaded image, but does
@@ -119,8 +124,35 @@ image: ## Build the container image (via ko) into bin/image.tar
 # k8s.io namespace specifically - the kubelet/CRI never looks at ctr's
 # default namespace, so importing without -n k8s.io leaves the image
 # invisible to Pods despite `ctr images list` showing it
-load: ## Import the image into the local k3s containerd store
+load: ## Import the image into the local k3s containerd store (needs root)
 	sudo k3s ctr -n k8s.io images import $(BIN_DIR)/image.tar
+
+# Build straight into a registry the cluster can pull from, which needs no
+# root: importing into k3s's containerd does, because its socket is owned by
+# root, and that is the only reason `load` above asks for a password. A node
+# sharing this host's network namespace - k3s, minikube --driver=none, kind
+# with the port mapped - resolves localhost:$(LOCAL_REGISTRY_PORT) to the
+# registry started here. A cluster elsewhere cannot, and wants `image` and
+# `load` instead.
+registry: ## Start a local OCI registry for the cluster to pull from
+	@if [ -z "$$($(CONTAINER_ENGINE) ps -q -f name=$(LOCAL_REGISTRY_NAME))" ]; then \
+		$(CONTAINER_ENGINE) run -d --rm -p $(LOCAL_REGISTRY_PORT):5000 \
+			--name $(LOCAL_REGISTRY_NAME) docker.io/library/registry:2 >/dev/null; \
+		echo "started $(LOCAL_REGISTRY_NAME) on localhost:$(LOCAL_REGISTRY_PORT)"; \
+	else \
+		echo "$(LOCAL_REGISTRY_NAME) already running on localhost:$(LOCAL_REGISTRY_PORT)"; \
+	fi
+
+registry-stop: ## Stop the local OCI registry
+	-@$(CONTAINER_ENGINE) rm -f $(LOCAL_REGISTRY_NAME) >/dev/null 2>&1
+
+push: registry ## Build and push the image to the local registry (no sudo)
+	KO_DOCKER_REPO=$(LOCAL_IMAGE_REPO) VERSION=$(VERSION) \
+	ko build ./$(CMD_DIR)/$(MANAGER_BIN) --bare --sbom=none --insecure-registry \
+		--platform=$(shell go env GOOS)/$(shell go env GOARCH) --tags=$(LOCAL_IMAGE_TAG) \
+		--image-label org.opencontainers.image.source=https://github.com/Garoze/Muninn \
+		--image-label org.opencontainers.image.description="Kubernetes-native runtime configuration resolver" \
+		--image-label org.opencontainers.image.licenses=MIT
 
 # apply the sample Namespace and ConfigMap to the cluster
 sample: ## Apply the sample Namespace and labeled ConfigMap

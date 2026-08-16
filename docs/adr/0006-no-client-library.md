@@ -6,8 +6,8 @@
 
 A client consuming this service's data would typically merge it through
 a layered, pluggable loader, a pattern that solves a different
-engineering problem than watching and caching Kubernetes custom
-resources, which is what this repository exists to demonstrate.
+engineering problem than watching and caching Kubernetes objects, which
+is what this repository exists to demonstrate.
 
 ## Decision
 

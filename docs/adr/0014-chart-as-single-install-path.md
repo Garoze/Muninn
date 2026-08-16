@@ -27,8 +27,8 @@ the chart, and the tests that assert over rendered authorization read
 that rendering from the chart rather than from a checked-in copy.
 
 Demonstration fixtures for a *consumer's* namespace stay as plain
-manifests. They are not part of installing this project — they are
-example input a user applies to their own namespace — and a chart that
+manifests. They are not part of installing this project - they are
+example input a user applies to their own namespace - and a chart that
 installed them would be installing someone else's objects.
 
 ## Alternatives considered
@@ -65,7 +65,7 @@ them.
 The published chart and the published image are separate artifacts with
 separate versions. Nothing in the chart binds it to a particular image
 digest, so a verified chart does not tell a consumer which image will
-run — a gap recorded in the verification documentation rather than hidden
+run - a gap recorded in the verification documentation rather than hidden
 by it.
 
 Deleting the manifests removed comments that explained real constraints.

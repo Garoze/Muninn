@@ -44,7 +44,14 @@ func (h *DiscoveryHandler) Query(ctx context.Context, req *discoveryv1.QueryRequ
 		c := classifyError(err)
 
 		h.Metrics.RequestsTotal.WithLabelValues("query", c.resultLabel, c.codeLabel).Inc()
-		h.Logger.Error("query failed",
+		// A caller asking about a namespace that carries no configuration is
+		// an ordinary answer, not an operator-facing failure - logging it at
+		// error level makes a healthy resolver look broken.
+		logFailure := h.Logger.Error
+		if errors.Is(err, app.ErrNamespaceNotFound) {
+			logFailure = h.Logger.Warn
+		}
+		logFailure("query failed",
 			zap.String("method", queryMethod),
 			zap.String("namespace", req.Namespace),
 			zap.Int("keys_count", len(req.Keys)),
@@ -128,7 +135,11 @@ func (h *DiscoveryHandler) Resolve(ctx context.Context, req *discoveryv1.Resolve
 		c := classifyError(err)
 
 		h.Metrics.RequestsTotal.WithLabelValues("resolve", c.resultLabel, c.codeLabel).Inc()
-		h.Logger.Error("resolve failed",
+		logFailure := h.Logger.Error
+		if errors.Is(err, app.ErrNamespaceNotFound) {
+			logFailure = h.Logger.Warn
+		}
+		logFailure("resolve failed",
 			zap.String("method", resolveMethod),
 			zap.String("namespace", req.Namespace),
 			zap.String("grpc_code", c.codeLabel),

@@ -75,7 +75,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				zap.String("namespace", review.Request.Namespace),
 			)
 		} else {
-			resolved := resolvedValues(r, h.svc, review.Request.Namespace, h.log)
+			// A resolve failure is denied rather than skipped, for the same
+			// reason the reconcile failure below is: this branch is only
+			// reached for a Pod that asked to be injected, and a resolution
+			// that failed is indistinguishable from an empty one at this
+			// point. Skipping would admit that Pod with no configuration and,
+			// where its namespace carries secret references, no secrets
+			// mount - the silent degradation the branch below refuses. The
+			// blast radius is the annotated Pod, not the cluster, which is
+			// what separates this from the fail-open cases above.
+			resolved, err := resolvedValues(r, h.svc, review.Request.Namespace)
+			if err != nil {
+				outcome = "denied"
+				h.log.Error("failed to resolve namespace configuration, denying admission",
+					zap.String("namespace", review.Request.Namespace),
+					zap.Error(err),
+				)
+				resp.Allowed = false
+				resp.Result = &metav1.Status{Message: err.Error()}
+				if err := writeAdmissionReview(w, &review, resp); err != nil {
+					outcome = "error"
+					h.log.Error("failed to encode AdmissionReview response", zap.Error(err))
+				}
+				return
+			}
+
 			refs := ExtractSecretRefs(resolved, h.log)
 
 			// Unlike the fail-open handling above, a SecretProviderClass
@@ -152,16 +176,14 @@ func writeAdmissionReview(w http.ResponseWriter, review *admissionv1.AdmissionRe
 
 // resolvedValues resolves a namespace's configuration against the webhook's
 // own in-process cache - no gRPC call to server, see docs/design.md. An
-// unconfigured namespace (no ConfigMap yet) is a normal case, not a failure;
-// only a genuine resolve error is logged.
-func resolvedValues(r *http.Request, svc *app.DiscoveryService, namespace string, log *zap.Logger) map[string]any {
+// unconfigured namespace (no ConfigMap yet) is a normal case and yields an
+// empty map; any other failure is returned, because the caller cannot tell an
+// empty configuration from one it failed to read, and the two lead to
+// different Pods.
+func resolvedValues(r *http.Request, svc *app.DiscoveryService, namespace string) (map[string]any, error) {
 	results, _, err := svc.Resolve(r.Context(), namespace)
 	if err != nil && !errors.Is(err, app.ErrNamespaceNotFound) {
-		log.Warn("failed to resolve namespace configuration",
-			zap.String("namespace", namespace),
-			zap.Error(err),
-		)
-		return nil
+		return nil, err
 	}
 
 	out := make(map[string]any, len(results))
@@ -169,5 +191,5 @@ func resolvedValues(r *http.Request, svc *app.DiscoveryService, namespace string
 		out[res.Key] = res.Value
 	}
 
-	return out
+	return out, nil
 }

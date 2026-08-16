@@ -201,6 +201,17 @@ func writeFileAtomic(path string, data []byte) error {
 		return fmt.Errorf("closing temp file: %w", err)
 	}
 
+	// CreateTemp makes the file 0600 and rename preserves it, which leaves it
+	// unreadable by a consumer container running as a different user - the
+	// ordinary case, since the injected containers run as the image's own
+	// non-root user. The file holds resolved configuration and never a secret
+	// value (see docs/adr/0012-csi-secret-delivery.md), so it is world-readable
+	// by design.
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("setting temp file mode: %w", err)
+	}
+
 	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming temp file into place: %w", err)

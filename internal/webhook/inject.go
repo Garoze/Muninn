@@ -62,10 +62,6 @@ func BuildPatch(pod *corev1.Pod, namespace string, cfg *config.Config, refs []Se
 		ops = append(ops, *op)
 	}
 
-	if op := containersOp(pod.Spec.Containers, namespace, cfg); op != nil {
-		ops = append(ops, *op)
-	}
-
 	ops = append(ops, appVolumeMountOps(pod.Spec.Containers, refs)...)
 
 	return ops
@@ -115,10 +111,20 @@ func csiSecretVolume(namespace string) corev1.Volume {
 
 // initContainersOp mirrors volumesOp for /spec/initContainers, which is
 // also omitempty and nil on most Pods.
+//
+// Both injected containers go here. The one-shot resolve runs to completion
+// first, then the watching one - a native sidecar, an init container carrying
+// restartPolicy: Always - starts and keeps running for the Pod's lifetime.
+//
+// The watching container must not be an ordinary entry in /spec/containers.
+// A Pod's ordinary containers must all exit for the Pod to succeed, so a
+// container that never exits keeps an annotated Job or CronJob Pod running
+// forever. A native sidecar is excluded from that condition, which is what
+// makes injection safe for a Pod that is meant to finish.
 func initContainersOp(current []corev1.Container, namespace string, cfg *config.Config) *patchOperation {
-	c := buildResolveContainer(initContainerName, namespace, cfg, false)
+	desired := withContainer(current, buildResolveContainer(initContainerName, namespace, cfg, false))
+	desired = withContainer(desired, buildSidecarContainer(namespace, cfg))
 
-	desired := withContainer(current, c)
 	if equality.Semantic.DeepEqual(desired, current) {
 		return nil
 	}
@@ -130,18 +136,15 @@ func initContainersOp(current []corev1.Container, namespace string, cfg *config.
 	return &patchOperation{Op: "replace", Path: "/spec/initContainers", Value: desired}
 }
 
-// containersOp mirrors volumesOp for /spec/containers, always via
-// "replace": a valid Pod always has at least one container already, so
-// /spec/containers is never empty/missing at admission time.
-func containersOp(current []corev1.Container, namespace string, cfg *config.Config) *patchOperation {
+// buildSidecarContainer is the watching resolve container as a native
+// sidecar. restartPolicy: Always on an init container is what marks it as
+// one: the Pod's startup proceeds once it has started rather than waiting for
+// it to exit, and it is restarted for as long as the Pod runs.
+func buildSidecarContainer(namespace string, cfg *config.Config) corev1.Container {
 	c := buildResolveContainer(sidecarContainerName, namespace, cfg, true)
-
-	desired := withContainer(current, c)
-	if equality.Semantic.DeepEqual(desired, current) {
-		return nil
-	}
-
-	return &patchOperation{Op: "replace", Path: "/spec/containers", Value: desired}
+	always := corev1.ContainerRestartPolicyAlways
+	c.RestartPolicy = &always
+	return c
 }
 
 // appVolumeMountOps mounts the shared volume(s) into every container the Pod

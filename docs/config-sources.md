@@ -22,7 +22,7 @@ informer, and a source only declares what to watch and how to read it.
 | `List` | An empty instance of the matching list type, used to seed the cache after sync. |
 | `LabelSelector` | Scopes which objects of that type are watched. |
 | `Scope` | What the object is scoped by, reported through `Describe`. |
-| `Extract` | Pulls configuration data out of one matching object. |
+| `Extract` | Pulls configuration data out of one matching object. Return only what a consumer should read as configuration: `ConfigMapSource` reads `data` and ignores `binaryData`, since a configuration value is text. |
 
 ## A worked example
 
