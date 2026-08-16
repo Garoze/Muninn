@@ -10,20 +10,14 @@
 * **ci:** stop the provenance step destroying the SBOM attestation ([1a7c8e9](https://github.com/Garoze/Muninn/commit/1a7c8e97542be5a09fcf62a1e8cfe4d3800b587f))
 * **ci:** keep the attestation verify from hanging the publish job ([21bbede](https://github.com/Garoze/Muninn/commit/21bbedef0d65d9e59e62b4b64e550cac9acca2d7))
 * **ci:** take the digest to sign from ko's stdout ([30232eb](https://github.com/Garoze/Muninn/commit/30232eb94a12f8f8e3f6aa70c481619361c5a8f2))
-
-## [0.2.2-alpha](https://github.com/Garoze/Muninn/compare/v0.2.1...v0.2.2-alpha) (2026-08-16)
+* **ci:** build the image for every declared platform ([6ded274](https://github.com/Garoze/Muninn/commit/6ded274496192a5b479bbc7a16b9f5299a028a55))
+* **ci:** keep develop's alphas numbered and :latest release-only ([512afd3](https://github.com/Garoze/Muninn/commit/512afd3c56d3da5bbe910692f9f60752a7609f7a))
+* **ci:** stop seeding an untagged version into the manifest ([0a81955](https://github.com/Garoze/Muninn/commit/0a81955218e1b4d5e6236d1479e8bf9096407335))
 
 
 ### Features
 
 * **ci:** attest the image SBOM and build provenance ([ce4651b](https://github.com/Garoze/Muninn/commit/ce4651b34bdf5f2969578df38208ef78c2e2214b))
-
-
-### Bug Fixes
-
-* **ci:** build the image for every declared platform ([6ded274](https://github.com/Garoze/Muninn/commit/6ded274496192a5b479bbc7a16b9f5299a028a55))
-* **ci:** keep develop's alphas numbered and :latest release-only ([512afd3](https://github.com/Garoze/Muninn/commit/512afd3c56d3da5bbe910692f9f60752a7609f7a))
-* **ci:** stop seeding an untagged version into the manifest ([0a81955](https://github.com/Garoze/Muninn/commit/0a81955218e1b4d5e6236d1479e8bf9096407335))
 
 
 ### Code Refactoring
