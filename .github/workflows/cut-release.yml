@@ -146,64 +146,13 @@ jobs:
       # never find the version its manifest now references, since the
       # commit it needs is not in develop's own ancestry at all.
       #
-      # CHANGELOG.md always conflicts here by design: develop keeps every
-      # alpha heading, main consolidates them, so the same content is
-      # grouped differently on each side. hack/resolve-changelog-backmerge.py
-      # resolves it by comparing develop's current file against develop's
-      # own file at the merge-base - anything not present there yet is
-      # genuinely new since the last sync and is kept; everything else
-      # comes from main, which is authoritative for already-released
-      # history. .release-please-manifest.json conflicts the opposite way -
-      # develop's own copy is authoritative there, since only develop's
-      # runs ever read it; main's copy is just an inherited byproduct of
-      # the last forward merge. Any other conflicted file is unexpected and
-      # fails the job rather than guessing at a resolution.
+      # The standalone back-merge workflow fires on the same pushes this job
+      # makes to main, so whichever runs first does the merge and the other
+      # finds nothing to do. The script is shared for that reason.
       - name: back-merge main into develop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main develop
-          branch="cut-release/backmerge-${{ inputs.version }}"
-          git checkout -b "$branch" origin/develop
-
-          merge_base="$(git merge-base origin/develop origin/main)"
-          git show "$merge_base:CHANGELOG.md" > /tmp/changelog-base.md 2>/dev/null || : > /tmp/changelog-base.md
-          git show origin/develop:CHANGELOG.md > /tmp/changelog-develop.md
-          git show origin/main:CHANGELOG.md > /tmp/changelog-main.md
-
-          set +e
-          git merge origin/main --no-commit -m "Merge main into develop"
-          merge_status=$?
-          set -e
-
-          if [ $merge_status -ne 0 ]; then
-            conflicted="$(git diff --name-only --diff-filter=U)"
-            for f in $conflicted; do
-              case "$f" in
-                CHANGELOG.md)
-                  python3 hack/resolve-changelog-backmerge.py \
-                    /tmp/changelog-develop.md /tmp/changelog-base.md /tmp/changelog-main.md CHANGELOG.md
-                  git add CHANGELOG.md
-                  ;;
-                .release-please-manifest.json)
-                  git checkout --ours .release-please-manifest.json
-                  git add .release-please-manifest.json
-                  ;;
-                *)
-                  echo "unexpected conflict in $f during the back-merge - needs manual resolution" >&2
-                  exit 1
-                  ;;
-              esac
-            done
-          fi
-
-          git commit \
-            -m "Merge main into develop" \
-            -m "- Brings ${{ inputs.version }}'s tag commit into develop's own ancestry, so release-please can find it. A develop -> main PR only advances main's ref; develop never sees main's exclusive commits without this in the other direction too."
-          git push origin "$branch"
-          gh pr create --base develop --head "$branch" \
-            --title "Merge main into develop: bring ${{ inputs.version }} back into develop's ancestry" \
-            --body "Brings ${{ inputs.version }}'s tag commit into develop's own ancestry, so release-please can find it. CHANGELOG.md and .release-please-manifest.json conflicts, if any, were resolved automatically - see the workflow run for details."
-          gh pr merge "$branch" --merge --delete-branch
+          hack/back-merge.sh "${{ inputs.version }}"
