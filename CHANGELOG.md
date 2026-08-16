@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.4-alpha](https://github.com/Garoze/Muninn/compare/v0.2.3...v0.2.4-alpha) (2026-08-16)
+
+
+### Bug Fixes
+
+* **ci:** close two defects the audit found in the release path ([326097f](https://github.com/Garoze/Muninn/commit/326097fc384c06ef7a025ef985c40fd0213e4f15))
+* close the audit's chart, permission and documentation findings ([d09b50b](https://github.com/Garoze/Muninn/commit/d09b50b12a9f3f78d417b6ce137c3111b4c001c4))
+* close the audit's remaining behavioural findings ([6a33b31](https://github.com/Garoze/Muninn/commit/6a33b31fa046aa358ab4877ed88cefef6249e62f))
+* close the audit's remaining minor findings ([49abdbf](https://github.com/Garoze/Muninn/commit/49abdbfff54ec05f8557dba5466a159a7c5d6835))
+* correct two claims the audit found and bump the chart ([402c4de](https://github.com/Garoze/Muninn/commit/402c4deb526036bfd1cb9b4263edd55af58110dd))
+
 ## [0.2.3](https://github.com/Garoze/Muninn/compare/v0.2.2...v0.2.3) (2026-08-16)
 
 
