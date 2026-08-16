@@ -969,6 +969,12 @@ is not, and must not become, what a floating tag points at: that tag is
 reserved for official releases by matching an exact three-part version,
 not by excluding the prerelease shapes anyone thought to enumerate.
 
+Publishing continuously while keeping the default branch and the floating
+tag free of in-progress work is what the two-branch topology buys, and
+[ADR-0016](adr/0016-two-branch-release-model.md) records what it costs to
+keep those branches consistent — along with the single-branch alternative
+that would remove that cost entirely.
+
 ---
 
 ## Decisions not taken
