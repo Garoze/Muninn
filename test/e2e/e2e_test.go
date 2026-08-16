@@ -46,6 +46,8 @@ const (
 	// deployed Pod uses this locally-loaded build rather than re-pulling
 	// the real published image under the same tag the chart's default
 	// values would otherwise reference.
+	// The fallback, for a cluster that cannot pull from a registry on this
+	// host and needs `make image load` instead.
 	localImageRepo = "ghcr.io/garoze/muninn"
 	localImageTag  = "local"
 	localImage     = localImageRepo + ":" + localImageTag
@@ -58,9 +60,12 @@ const injectPodName = "netrunner"
 
 // TestE2E installs the in-tree chart against a real cluster and exercises
 // the result through the real gRPC wire protocol over a port-forward.
-// Requires a real cluster with the image already built and loaded under the
-// localImage tag (`make image load IMG=ghcr.io/garoze/muninn:local`) - not
-// done here, since `make load` needs interactive sudo.
+//
+// The image comes from MUNINN_E2E_IMAGE, which `make test-e2e` sets after
+// building into a local registry the cluster pulls from. That path needs no
+// root, unlike importing into k3s's containerd, whose socket is root-owned.
+// Without the variable it falls back to the tag `make image load` produces,
+// for a cluster that cannot reach such a registry.
 func TestE2E(t *testing.T) {
 	if os.Getenv("MUNINN_IT_E2E") != "1" {
 		t.Skip("set MUNINN_IT_E2E=1 to run e2e tests against a real cluster")
@@ -305,6 +310,22 @@ func runMake(t *testing.T, repoRoot, target string, vars ...string) {
 	}
 }
 
+// e2eImage splits MUNINN_E2E_IMAGE into the repository and tag the chart
+// wants as separate values, falling back to the locally-loaded tag. A digest
+// is deliberately not accepted here: this tier exists to exercise a build
+// that has not been published, and pinning one would defeat that.
+func e2eImage() (repo, tag string) {
+	ref := os.Getenv("MUNINN_E2E_IMAGE")
+	if ref == "" {
+		return localImageRepo, localImageTag
+	}
+	i := strings.LastIndex(ref, ":")
+	if i < 0 || strings.Contains(ref[i+1:], "/") {
+		return ref, "latest"
+	}
+	return ref[:i], ref[i+1:]
+}
+
 // helmDeploy runs `helm install` or `helm upgrade` for the chart against
 // deployNamespace, pinning the locally-loaded image. The chart comes from
 // the working tree, never the registry - proving what a consumer pulls from
@@ -314,12 +335,12 @@ func helmDeploy(t *testing.T, repoRoot string, env []string, action string, sets
 	t.Helper()
 	args := []string{action, helmRelease, chartutil.Path(t), "--namespace", deployNamespace}
 	if action == "install" {
-		// The chart carries its own Namespace resource, but Helm writes the
-		// release record into the target namespace before applying anything,
-		// so the namespace has to exist first.
+		// Nothing in the chart creates the namespace, and Helm writes the
+		// release record into it before applying anything.
 		args = append(args, "--create-namespace")
 	}
-	args = append(args, "--set", "image.repository="+localImageRepo, "--set", "image.tag="+localImageTag)
+	repo, tag := e2eImage()
+	args = append(args, "--set", "image.repository="+repo, "--set", "image.tag="+tag)
 	for _, s := range sets {
 		args = append(args, "--set", s)
 	}

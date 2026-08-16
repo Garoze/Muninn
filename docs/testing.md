@@ -51,10 +51,24 @@ make test-integration
 ## End-to-end
 
 ```bash
-make image load IMG=ghcr.io/garoze/muninn:local   # `make load` requires interactive sudo
-make test-e2e                                      # against an existing cluster
-
+make test-e2e           # against an existing cluster; builds and pushes for you
 make test-e2e-csi       # provisions a disposable kind cluster, then removes it
+```
+
+`make test-e2e` builds the image into a local registry and points the chart
+at it, which needs no root. Importing into k3s's containerd does, because its
+socket is owned by root, and that is the only thing `make load` needs a
+password for. The registry keeps running between runs; `make registry-stop`
+removes it.
+
+This works for a node that shares this host's network namespace, which
+resolves `localhost:5000` to that registry - k3s, `minikube --driver=none`,
+or kind with the port mapped. For a cluster anywhere else, build a tarball
+and load it however that cluster expects, then point the test at the result:
+
+```bash
+make image load IMG=ghcr.io/garoze/muninn:local    # k3s; needs sudo
+MUNINN_E2E_IMAGE=ghcr.io/garoze/muninn:local make test-e2e
 ```
 
 `make test-e2e` installs the chart an operator installs, enabling the webhook
