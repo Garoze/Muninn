@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2-alpha.2](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.1...v0.2.2-alpha.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **ci:** keep the attestation verify from hanging the publish job ([21bbede](https://github.com/Garoze/Muninn/commit/21bbedef0d65d9e59e62b4b64e550cac9acca2d7))
+
 ## [0.2.2-alpha.1](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha...v0.2.2-alpha.1) (2026-08-16)
 
 
