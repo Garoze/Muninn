@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.2.2-alpha](https://github.com/Garoze/Muninn/compare/v0.2.1...v0.2.2-alpha) (2026-08-16)
+
+
+### Features
+
+* **ci:** attest the image SBOM and build provenance ([ce4651b](https://github.com/Garoze/Muninn/commit/ce4651b34bdf5f2969578df38208ef78c2e2214b))
+
+
+### Bug Fixes
+
+* **ci:** build the image for every declared platform ([6ded274](https://github.com/Garoze/Muninn/commit/6ded274496192a5b479bbc7a16b9f5299a028a55))
+* **ci:** keep develop's alphas numbered and :latest release-only ([512afd3](https://github.com/Garoze/Muninn/commit/512afd3c56d3da5bbe910692f9f60752a7609f7a))
+* **ci:** stop seeding an untagged version into the manifest ([0a81955](https://github.com/Garoze/Muninn/commit/0a81955218e1b4d5e6236d1479e8bf9096407335))
+
+
+### Code Refactoring
+
+* **ci:** install the chart from the deploy targets ([b1b2bd7](https://github.com/Garoze/Muninn/commit/b1b2bd7c58ba8f336b83c16ef4ed99b4d09f6cb6))
+* delete the static manifests the chart replaced ([2e25e49](https://github.com/Garoze/Muninn/commit/2e25e492bf23ef09034073b2971381e01923e7de))
+
+
+### Documentation
+
+* **testing:** correct what rendering the chart adds over its unit tests ([08adb85](https://github.com/Garoze/Muninn/commit/08adb858a55da8850a20c6a78aace96f52cbc882))
+
 ## 0.2.0 (2026-08-15)
 
 
