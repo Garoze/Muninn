@@ -27,38 +27,47 @@ jobs:
           ref: ${{ inputs.tag || github.ref_name }}
       # A tag can be placed on any commit, including one whose checks failed
       # or never ran, and everything below would sign and attest it just the
-      # same - the signature would be perfectly valid and the artifact would
-      # be one nobody agreed to ship. Tags normally come from a release pull
-      # request that CI already passed, so this is a guard on the unusual
-      # case, not the common one.
+      # same - the signature would be perfectly valid and the artifact one
+      # nobody agreed to ship.
+      #
+      # The tagged commit itself often has no checks of its own: a release cut
+      # merges its changelog commit with GITHUB_TOKEN, and GitHub does not
+      # trigger workflows for pushes made with that token. So this walks back
+      # to the nearest commit that does have check runs and requires those to
+      # have passed - for a cut, the develop -> main merge that carried the
+      # code. A tag on a commit with no checked ancestor nearby is refused.
       - name: refuse to publish a commit that did not pass CI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          sha=$(git rev-parse HEAD)
           checks() {
-            gh api "repos/${{ github.repository }}/commits/$sha/check-runs" \
+            gh api "repos/${{ github.repository }}/commits/$1/check-runs" \
               --jq '.check_runs[] | select(.name != "publish") | "\(.name)=\(.conclusion // "pending")"'
           }
 
-          # A release cut tags main and dispatches this immediately, so the
-          # push's own checks are usually still running. Wait for them rather
-          # than reading "not finished yet" as "failed".
-          for _ in $(seq 1 40); do
-            conclusions=$(checks)
-            echo "$conclusions" | grep -q "=pending$" || break
-            sleep 15
+          for sha in $(git rev-list HEAD -n 10); do
+            # A cut tags and dispatches immediately, so the checks it does
+            # have may still be running. Wait rather than reading "not
+            # finished yet" as "failed".
+            for _ in $(seq 1 40); do
+              conclusions=$(checks "$sha")
+              echo "$conclusions" | grep -q "=pending$" || break
+              sleep 15
+            done
+
+            [ -n "$conclusions" ] || continue
+
+            echo "checks on $sha:"
+            echo "$conclusions"
+            if echo "$conclusions" | grep -qvE "=(success|skipped|neutral)$"; then
+              echo "at least one check on $sha did not succeed" >&2
+              exit 1
+            fi
+            exit 0
           done
 
-          echo "$conclusions"
-          if [ -z "$conclusions" ]; then
-            echo "no check runs found for $sha - refusing to publish an unverified commit" >&2
-            exit 1
-          fi
-          if echo "$conclusions" | grep -qvE "=(success|skipped|neutral)$"; then
-            echo "at least one check on $sha did not succeed" >&2
-            exit 1
-          fi
+          echo "no checked commit found in the last 10 - refusing to publish" >&2
+          exit 1
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
