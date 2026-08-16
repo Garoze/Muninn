@@ -95,7 +95,7 @@ into independent concerns, open separate PRs rather than bundling them.
 ## Releases
 
 Nothing is released by hand, and every step below publishes through the
-same pipeline under the same identity — see
+same pipeline under the same identity - see
 [`docs/verification.md`](docs/verification.md) for what that identity is
 and how a consumer checks it.
 
@@ -117,8 +117,8 @@ back into `develop`.
 
 That last step matters more than it looks. A `develop` → `main` pull
 request only advances `main`; `develop` never moves, so anything
-committed on `main` — a release's tag and changelog, or a fix applied
-there directly — stays outside `develop`'s history until something merges
+committed on `main` - a release's tag and changelog, or a fix applied
+there directly - stays outside `develop`'s history until something merges
 in the other direction. A push to `main` now opens that merge
 automatically, and both routes exit cleanly when there is nothing to
 bring back.

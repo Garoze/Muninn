@@ -20,7 +20,7 @@ func TestDefault(t *testing.T) {
 
 // TestLdflagsStamping is the actual proof for the risk -ldflags -X carries:
 // -X targets a fully-qualified symbol path, so renaming the package or the
-// variable makes the stamp silently become an empty string — the build
+// variable makes the stamp silently become an empty string - the build
 // still succeeds and nothing fails. A default-value-only test would not
 // catch that regression; this rebuilds the binary the same way `make
 // build` does and asserts the stamped value actually reaches the binary.

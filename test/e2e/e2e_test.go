@@ -444,7 +444,7 @@ func checkNotImagePullError(t *testing.T, k8sClient client.Client, namespace str
 			}
 			switch cs.State.Waiting.Reason {
 			case "ErrImagePull", "ImagePullBackOff":
-				t.Skip("image not loaded into the node's containerd store — run `make image load` first")
+				t.Skip("image not loaded into the node's containerd store - run `make image load` first")
 			}
 		}
 	}
