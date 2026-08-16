@@ -110,9 +110,10 @@ Optional dependencies, which Muninn does not install:
 | [`setup-envtest`](https://pkg.go.dev/sigs.k8s.io/controller-runtime/tools/setup-envtest) | `make test-integration` |
 | [`grpcurl`](https://github.com/fullstorydev/grpcurl) | Calling the API without `muninnctl` |
 | [`helm`](https://helm.sh/) | `make deploy`, `make test-integration`, `make test-e2e`, `make test-e2e-csi` |
-| [`kind`](https://kind.sigs.k8s.io/) and a container engine | `make test-e2e-csi` |
+| [`kind`](https://kind.sigs.k8s.io/) | `make test-e2e-csi` |
+| A container engine (podman or docker) | `make test-e2e` and `make test-e2e-csi`, which build into a local registry |
 | [`cosign`](https://github.com/sigstore/cosign), [`crane`](https://github.com/google/go-containerregistry), [`gh`](https://cli.github.com/) and `jq` | [Verifying published artifacts](docs/verification.md) |
-| [`ko`](https://ko.build/) | `make image` |
+| [`ko`](https://ko.build/) | `make image`, `make push` |
 
 ### Run it
 

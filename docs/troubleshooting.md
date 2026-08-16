@@ -22,20 +22,27 @@ override builds and loads a local image under that tag, then `deploy`'s
 build was never used, and nothing about that failure is visible; the Pod
 just starts normally.
 
-**Fix:** Always pass a distinct, non-`latest` `IMG` for local testing,
-consistently across all three steps:
+**Fix:** Name the local build explicitly when deploying it. `make push`
+tags what it builds `e2e`, and `deploy` has to be pointed at the same
+reference - it does not infer one:
+
+```bash
+make push
+make deploy IMG=localhost:5000/muninn:e2e
+```
+
+The tarball path has the same requirement, across all three steps:
 
 ```bash
 make image load IMG=ghcr.io/garoze/muninn:local
 make deploy IMG=ghcr.io/garoze/muninn:local
 ```
 
-A non-`latest` tag's `IfNotPresent` default means the Pod uses what was
-just loaded rather than reaching out to the registry at all. The
-end-to-end test (`make test-e2e`) already does this consistently via a
-package-level constant, used both to build the image and to set the chart's
-image values, precisely so this class of mismatch can't happen silently
-there either.
+Either way the point is a tag that is not `latest`: its `IfNotPresent`
+default means the Pod uses the build you just produced instead of pulling
+the published image over it. `make test-e2e` passes the reference it built
+through to the chart itself, so this mismatch cannot happen silently
+there.
 
 ## Pod stuck with `ErrImagePull`
 

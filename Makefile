@@ -93,9 +93,9 @@ test-integration: ## Integration tests against a throwaway control plane
 	MUNINN_IT_ENVTEST=1 go test ./test/integration/envtest/... ./cmd/muninn/... -v -count=1
 
 # installs the chart against your real cluster and exercises it over a
-# port-forward. Requires the image already built and loaded
-# (`make image load` - not run automatically here, since `load` needs
-# interactive sudo). Not part of `make test` or CI - see docs/design.md.
+# port-forward. `push` builds the image into a registry the node pulls from,
+# so this needs no root; override MUNINN_E2E_IMAGE for a cluster that cannot
+# reach that registry. Not part of `make test` or CI - see docs/design.md.
 test-e2e: push ## End-to-end against a cluster you already have
 	MUNINN_IT_E2E=1 MUNINN_E2E_IMAGE=$(LOCAL_IMAGE_REPO):$(LOCAL_IMAGE_TAG) \
 	go test ./test/e2e/... -run TestE2E -v -timeout 8m -count=1
@@ -124,7 +124,7 @@ image: ## Build the container image (via ko) into bin/image.tar
 # k8s.io namespace specifically - the kubelet/CRI never looks at ctr's
 # default namespace, so importing without -n k8s.io leaves the image
 # invisible to Pods despite `ctr images list` showing it
-load: ## Import the image into the local k3s containerd store
+load: ## Import the image into the local k3s containerd store (needs root)
 	sudo k3s ctr -n k8s.io images import $(BIN_DIR)/image.tar
 
 # Build straight into a registry the cluster can pull from, which needs no
