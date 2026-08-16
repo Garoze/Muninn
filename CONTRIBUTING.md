@@ -79,10 +79,13 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/):
 - Types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `ci`
 - Scopes: `api`, `app`, `kube`, `transport`, `config`, `ci`, `deps`
 
-`feat`, `fix`, `docs` and `refactor` are visible in the changelog and a
-commit carrying one of them is enough to raise a release. Pipeline
-plumbing that changes nothing a consumer installs belongs under `ci` or
-`chore`, which are hidden.
+The test a type has to pass is whether the commit can change what gets
+published. `feat`, `fix` and `refactor` can, and are visible in the
+changelog; a refactor alters the artifact even when behaviour is
+unchanged. `docs`, `test`, `ci` and `chore` cannot: documentation ships in
+this repository rather than inside the image or the chart, so a
+documentation change leaves both byte-identical. Those are hidden, and
+pipeline plumbing belongs under `ci` or `chore` rather than under `fix`.
 
 ## Pull requests
 
