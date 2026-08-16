@@ -22,7 +22,7 @@ changes.
 
 ## Project layout
 
-| Package | Role |
+| Path | Role |
 |---|---|
 | `internal/kube` | `ConfigSource` interface and `ConfigMapSource`, informers, patch-based cache sync |
 | `internal/app` | domain layer: `Cache`, `DiscoveryService`, sentinel errors |
@@ -31,6 +31,10 @@ changes.
 | `internal/discoveryclient` | shared gRPC dial helper |
 | `internal/observability` | metrics, tracing, health |
 | `internal/config` | env-driven configuration |
+| `charts/muninn` | the chart, which is the only install path |
+| `test/` | integration (envtest) and end-to-end tiers |
+| `.github/workflows` | CI, publishing, the release cut, the back-merge, and the nightly |
+| `hack/` | scripts the release workflows call, with their fixtures |
 
 The domain layer imports no Kubernetes or gRPC types, and a change that
 introduces one there belongs at an edge instead. [`docs/design.md`](docs/design.md)
@@ -68,13 +72,53 @@ each tier is responsible for proving.
 This project uses [Conventional Commits](https://www.conventionalcommits.org/):
 `type(scope): description`
 
-- Types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`
+- Types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `ci`
 - Scopes: `api`, `app`, `kube`, `transport`, `config`, `ci`, `deps`
+
+`feat`, `fix`, `docs` and `refactor` are visible in the changelog and a
+commit carrying one of them is enough to raise a release. Pipeline
+plumbing that changes nothing a consumer installs belongs under `ci` or
+`chore`, which are hidden.
 
 ## Pull requests
 
 Keep PRs small and focused on one change. If a change naturally splits
 into independent concerns, open separate PRs rather than bundling them.
+
+## Releases
+
+Nothing is released by hand, and every step below publishes through the
+same pipeline under the same identity — see
+[`docs/verification.md`](docs/verification.md) for what that identity is
+and how a consumer checks it.
+
+**Prereleases happen on their own.** Merging to `develop` updates a
+release pull request holding the next version and its changelog entry.
+Merging *that* tags the prerelease, which publishes the image, the chart
+and the attestations. Nothing about this is optional: exercising the
+release path continuously is what stops its defects from being discovered
+during a release.
+
+The first prerelease after a release carries no increment, and the ones
+after it do. Both shapes are prereleases and neither ever receives the
+floating `latest` tag, which is reserved for an exact three-part version.
+
+**Official releases are cut deliberately**, by dispatching the release
+workflow from `main` with the version to cut. It consolidates the
+prerelease changelog entries into one, tags, publishes, and merges `main`
+back into `develop`.
+
+That last step matters more than it looks. A `develop` → `main` pull
+request only advances `main`; `develop` never moves, so anything
+committed on `main` — a release's tag and changelog, or a fix applied
+there directly — stays outside `develop`'s history until something merges
+in the other direction. A push to `main` now opens that merge
+automatically, and both routes exit cleanly when there is nothing to
+bring back.
+
+**Dependency updates target `develop`**, not the default branch, so the
+workflows a bump changes are exercised by CI and a prerelease before they
+can reach a release.
 
 ## Documenting a decision
 
