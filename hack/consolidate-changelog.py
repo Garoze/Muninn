@@ -10,8 +10,12 @@ individual alphas along the way.
 import re
 import sys
 
-ALPHA_HEADING = re.compile(r"^## (?:\[[^\]]+\]\([^)]*\)|\S+) \(\d{4}-\d{2}-\d{2}\)\s*$")
-IS_ALPHA = re.compile(r"-alpha\.\d+")
+ALPHA_HEADING = re.compile(r"^## (?:\[([^\]]+)\]\([^)]*\)|(\S+)) \(\d{4}-\d{2}-\d{2}\)\s*$")
+# An entry is a prerelease when its version is not exactly X.Y.Z. Matching the
+# prerelease suffixes instead only catches the ones written down: the first
+# prerelease after a release carries a bare -alpha, with no increment, and an
+# -alpha.N pattern leaves that entry stranded on main outside any release.
+OFFICIAL_VERSION = re.compile(r"^v?\d+\.\d+\.\d+$")
 SECTION_HEADING = re.compile(r"^### (.+)$")
 
 
@@ -28,6 +32,14 @@ def split_blocks(text):
     if current:
         blocks.append("".join(current))
     return blocks
+
+
+def is_prerelease_heading(line):
+    m = ALPHA_HEADING.match(line)
+    if not m:
+        return False
+    version = m.group(1) or m.group(2)
+    return not OFFICIAL_VERSION.match(version)
 
 
 def block_heading_line(block):
@@ -69,7 +81,7 @@ def main():
     remaining = []
     for i, block in enumerate(rest):
         heading = block_heading_line(block)
-        if heading and IS_ALPHA.search(heading):
+        if heading and is_prerelease_heading(heading):
             alpha_blocks.append(block)
         else:
             remaining = rest[i:]
