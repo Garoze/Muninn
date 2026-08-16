@@ -98,15 +98,25 @@ jobs:
       # here - left alone, its next run continues the prerelease line this
       # version was cut from instead of a line above it, producing a version
       # that sorts before the release just published. Resetting the
-      # manifest to the version just cut makes the next alpha compute above
-      # it, the same way "sync with the changelog update" keeps main's tip
-      # accurate after the step before it.
+      # manifest makes the next alpha compute above it, the same way "sync
+      # with the changelog update" keeps main's tip accurate after the step
+      # before it.
+      #
+      # The seed is the next patch at -alpha.0, not the version just cut,
+      # because release-please only increments a prerelease that already
+      # carries a number: from a plain release it emits a bare -alpha, and
+      # develop is supposed to publish -alpha.N so every alpha is a distinct,
+      # testable artifact. -alpha.0 is never tagged, so the compare link in
+      # the first alpha's changelog entry points at a tag that does not
+      # exist - the cost of seeding this way.
       - name: resync develop's release-please manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           stripped="${{ inputs.version }}"
           stripped="${stripped#v}"
+          IFS=. read -r seed_major seed_minor seed_patch <<< "$stripped"
+          stripped="${seed_major}.${seed_minor}.$((seed_patch + 1))-alpha.0"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin develop
@@ -118,12 +128,12 @@ jobs:
           fi
           git add .release-please-manifest.json
           git commit \
-            -m "chore(release-please): resync manifest to ${{ inputs.version }}" \
-            -m "- Sets the manifest to the version just cut from main, so the next alpha computes above it instead of continuing the prerelease line it was cut from."
+            -m "chore(release-please): seed manifest to $stripped" \
+            -m "- Seeds the manifest above ${{ inputs.version }}, the version just cut from main, so the next alpha computes above it instead of continuing the prerelease line it was cut from, and carries an increment rather than a bare -alpha."
           git push origin "$branch"
           gh pr create --base develop --head "$branch" \
-            --title "chore(release-please): resync manifest to ${{ inputs.version }}" \
-            --body "Sets the release-please manifest to ${{ inputs.version }}, the version just cut from main, so the next alpha computes above it instead of continuing the prerelease line it was cut from."
+            --title "chore(release-please): seed manifest to $stripped" \
+            --body "Seeds the release-please manifest above ${{ inputs.version }}, the version just cut from main, so the next alpha computes above it instead of continuing the prerelease line it was cut from, and carries an increment rather than a bare \`-alpha\`."
           gh pr merge "$branch" --merge --delete-branch
       # main-exclusive commits (this cut's tag, the changelog consolidation)
       # never become reachable from develop just because develop was merged
