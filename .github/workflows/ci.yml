@@ -40,6 +40,10 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
+      # These run once per release against real history, where a defect is
+      # awkward to undo, and no other tier exercises them.
+      - name: release scripts
+        run: python3 hack/consolidate_changelog_test.py
       # A tag is a mutable reference, and one of these workflows holds the
       # identity that signs releases. The trailing version comment is what
       # keeps the pin readable and what Dependabot rewrites on a bump.
