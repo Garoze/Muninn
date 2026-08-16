@@ -18,15 +18,15 @@ jobs:
     steps:
       # inputs.tag is only set when this workflow is dispatched explicitly,
       # not on a direct tag push
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref_name }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - name: install ko
         run: go install github.com/google/ko@v0.19.1
-      - uses: azure/setup-helm@v5.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.2.4
       # GHCR requires a lowercase path; github.repository is "Garoze/Muninn"
@@ -36,7 +36,7 @@ jobs:
           echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
           echo "CHARTS=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/charts" >> "$GITHUB_ENV"
       - name: log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -68,7 +68,7 @@ jobs:
             --image-label org.opencontainers.image.licenses=MIT
           echo "digest=$(cut -d@ -f2 ko-image-refs.txt)" >> "$GITHUB_OUTPUT"
       - name: install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
       # Signs the digest this build step actually produced, not the tag -
       # steps.build.outputs.digest is what makes that possible
       - name: sign the image digest

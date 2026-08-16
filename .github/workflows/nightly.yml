@@ -31,12 +31,12 @@ jobs:
             cert_manager_preinstalled: false
             subcharts_enabled: true
     steps:
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.26"
       - name: install crane
         run: go install github.com/google/go-containerregistry/cmd/crane@v0.20.7
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
       # Installing from the published artifacts, not this checkout, is the
       # entire point of this workflow - no checkout step exists here.
       - name: verify published image signature
@@ -59,7 +59,7 @@ jobs:
         run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.9.0 bash
       - name: create cluster
         run: k3d cluster create nightly-${{ matrix.name }} --image rancher/k3s:v1.36.3-k3s1 --wait --timeout 120s
-      - uses: azure/setup-helm@v5.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.2.4
       - name: install cert-manager
