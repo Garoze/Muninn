@@ -19,3 +19,6 @@ listed here, lives in [`../design.md`](../design.md).
 | [0010](0010-single-process-webhook.md) | Webhook runs as a subcommand of the same binary, deployed as a separate process |
 | [0011](0011-resolve-rpc.md) | A dedicated Resolve RPC instead of overloading Query |
 | [0012](0012-csi-secret-delivery.md) | Secrets delivered via CSI, never through Muninn's own process |
+| [0013](0013-workflow-identity-publishing.md) | Artifacts published and signed under a workflow identity, not a stored credential |
+| [0014](0014-chart-as-single-install-path.md) | A packaged chart as the single install path |
+| [0015](0015-opt-in-subcharts.md) | Cluster-singleton prerequisites ship as opt-in dependencies, default off |

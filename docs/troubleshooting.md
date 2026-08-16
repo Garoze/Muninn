@@ -219,3 +219,130 @@ decision rather than automated. To see the sidecar's report as a
 Kubernetes `Event` rather than only in its logs, the consumer
 namespace's ServiceAccount needs `create` on `events.k8s.io`;
 `make sample-events` applies a runnable example of that grant.
+
+## `cosign verify` fails with `no matching signatures`
+
+**Symptom:** Verifying a published image or chart reports `no matching
+signatures: none of the expected identities matched what was in the
+certificate`, and the message goes on to print an identity that looks
+identical to the one that was passed.
+
+**Cause:** It is not identical. The signing identity carries the
+repository name exactly as GitHub spells it, capitals included, while
+every registry reference is lowercase because registries require it.
+An identity written by copying the image reference will differ from the
+certificate's subject by case alone.
+
+**Fix:** Take the identity from
+[`docs/verification.md`](verification.md) rather than deriving it from
+the image path. To see what the certificate actually carries, verify with
+`--certificate-identity-regexp '.*'` once: the error and the successful
+output both print the subject.
+
+## `cosign verify` refuses to run at all
+
+**Symptom:** `--certificate-identity or --certificate-identity-regexp is
+required for verification in keyless mode`.
+
+**Cause:** Not a defect. A keyless signature that is merely *valid*
+establishes only that somebody signed the artifact. Without an asserted
+identity and issuer the check would confirm nothing worth confirming, so
+the tool declines rather than producing a reassuring result.
+
+**Fix:** Pass both `--certificate-identity` and
+`--certificate-oidc-issuer`.
+
+## `cosign verify-attestation` prints its result and then hangs
+
+**Symptom:** Verification succeeds — the summary and certificate subject
+appear — and the command never exits. In a CI job this looks like a hung
+step long after the work finished.
+
+**Cause:** The verification summary goes to stderr, and the attestation
+payload, around a megabyte, goes to stdout. If nothing drains stdout, the
+write blocks and the process waits forever with the verification already
+complete.
+
+**Fix:** Redirect stdout to a file and read the payload from there.
+Piping into a command that consumes it works too, which is why the
+problem hides in interactive use and appears in automation.
+
+## `gh attestation verify` prints nothing
+
+**Symptom:** The command produces no output and exits 0, giving no
+indication whether anything was verified.
+
+**Cause:** It prints its human-readable summary only to a terminal.
+
+**Fix:** Treat the exit status as the result, or pass `--format json` and
+assert on the predicate type. Automation should do the latter: an exit
+status alone does not distinguish a verified provenance statement from
+one of a different type.
+
+## An attestation that verified earlier no longer verifies
+
+**Symptom:** An artifact whose SBOM attestation verified shortly after
+publication later reports `none of the attestations matched the predicate
+type`, naming a different predicate than the one requested.
+
+**Cause:** Attestations attached to an image digest share one location,
+and a second writer replaces the first rather than adding to it. When one
+of the writers publishes asynchronously, the replacement arrives after
+the release has already reported success, so the artifact changes with no
+failure anywhere.
+
+**Fix:** Keep one writer per location — this project publishes provenance
+to its attestation store rather than to the registry for exactly this
+reason. Verify published artifacts on a schedule rather than only during
+the release that produced them.
+
+## `helm install` fails on missing `cert-manager.io` resources
+
+**Symptom:** Installing the chart fails with `no matches for kind
+"Certificate" in version "cert-manager.io/v1"`, or `no matches for kind
+"Issuer"`.
+
+**Cause:** The webhook is enabled by default and needs a certificate the
+API server trusts. Its default source is cert-manager, which the chart
+expects on the cluster rather than installing.
+
+**Fix:** Install cert-manager, or choose a certificate mode with no
+external dependency, or have the chart install cert-manager itself as an
+opt-in dependency — see
+[`docs/deployment.md`](deployment.md) for the three modes and
+[ADR-0015](adr/0015-opt-in-subcharts.md) for why that dependency is off
+by default. A fresh cluster enabling it needs the two-phase install
+described there: cert-manager's own webhook must be serving before a
+`Certificate` is admitted.
+
+## Webhook rejects every Pod after an upgrade
+
+**Symptom:** Installation was working. After a chart upgrade, Pod
+creation fails with a TLS error naming an unknown authority, and the
+webhook's own Pods may fail to reschedule.
+
+**Cause:** The self-signed certificate mode generates its certificate
+authority at install time. An upgrade regenerates it, while the
+registered admission configuration still carries the previous bundle, so
+the API server no longer trusts the certificate the webhook serves.
+
+**Fix:** For anything beyond a demo cluster, use cert-manager or a
+provided certificate instead, both of which survive upgrades. To recover
+an installation already in this state, uninstall and reinstall so that
+the configuration and the certificate are generated together.
+
+## Pod stuck in `ContainerCreating` after enabling secrets
+
+**Symptom:** With secret delivery enabled, an annotated Pod never starts
+and its events report a failed mount referring to a `SecretProviderClass`
+or a CSI driver.
+
+**Cause:** Enabling secret delivery grants this project permission to
+describe what should be mounted. It does not install the driver that
+performs the mount, which is a node-level component and a cluster
+singleton.
+
+**Fix:** Install `secrets-store-csi-driver` and a provider for the store
+in use, or enable it as an opt-in dependency of the chart. See
+[`docs/secret-references.md`](secret-references.md) for the two modes and
+what each expects.
