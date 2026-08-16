@@ -10,6 +10,8 @@ on:
 permissions:
   contents: read
   issues: write
+  # gh attestation verify reads this repository's attestation store
+  attestations: read
 
 jobs:
   install:
@@ -44,6 +46,27 @@ jobs:
           cosign verify ghcr.io/garoze/muninn:latest \
             --certificate-identity-regexp "^https://github.com/${{ github.repository }}/.github/workflows/publish.yml@refs/tags/v.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+      # The publish job cannot prove an attestation survived: GitHub's own
+      # attestation push lands asynchronously, after that job has already
+      # reported success, and has overwritten the SBOM in the digest's .att
+      # tag before. This tier reads the artifact long after the fact, so it
+      # is the only one positioned to catch that.
+      #
+      # The two live in different places and neither tool reads both: the
+      # SBOM in .att, provenance in this repository's attestation store.
+      - name: verify published image attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          digest=$(crane digest ghcr.io/garoze/muninn:latest)
+          timeout 120 cosign verify-attestation --type spdxjson ghcr.io/garoze/muninn@"$digest" \
+            --certificate-identity-regexp "^https://github.com/${{ github.repository }}/.github/workflows/publish.yml@refs/tags/v.*" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" > sbom-attestation.json
+          jq -e '.payload' sbom-attestation.json > /dev/null
+          timeout 120 gh attestation verify "oci://ghcr.io/garoze/muninn@$digest" \
+            --repo ${{ github.repository }} --format json > provenance-attestation.json
+          jq -e '.[0].verificationResult.statement.predicateType == "https://slsa.dev/provenance/v1"' \
+            provenance-attestation.json > /dev/null
       # No floating "latest" tag exists for the chart - the highest semver
       # tag actually published is the equivalent, resolved directly against
       # the registry rather than assumed from Chart.yaml in this checkout.
