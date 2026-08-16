@@ -395,3 +395,23 @@ func TestCmdResolve_MissingRequiredFlags(t *testing.T) {
 		})
 	}
 }
+
+// The injected containers run as the image's own non-root user, and a
+// consumer container commonly runs as a different one. A file created by
+// CreateTemp is 0600 and rename preserves that, so this asserts the mode a
+// second user can actually read.
+func TestWriteFileAtomic_ModeIsReadableByOtherUsers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+
+	if err := writeFileAtomic(path, []byte("LOG_LEVEL: debug\n")); err != nil {
+		t.Fatalf("writeFileAtomic: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if got, want := info.Mode().Perm(), os.FileMode(0o644); got != want {
+		t.Errorf("mode = %v, want %v", got, want)
+	}
+}

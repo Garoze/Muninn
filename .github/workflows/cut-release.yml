@@ -60,6 +60,17 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           branch="cut-release/changelog-${{ inputs.version }}"
           git checkout -b "$branch"
+          # The consolidation exits without writing when there is no
+          # prerelease block to merge, which happens when a release is cut
+          # while release-please's pending pull request is still open. The
+          # manifest still changes, so the step reported success and the job
+          # went on to tag and publish a version its own changelog never
+          # mentioned - twice. Fail instead.
+          if ! grep -qE "^## (\[)?${stripped}(\])?" CHANGELOG.md; then
+            echo "CHANGELOG.md has no heading for ${stripped} after consolidation." >&2
+            echo "Merge release-please's open release pull request on develop first, so its entries exist to consolidate." >&2
+            exit 1
+          fi
           git add CHANGELOG.md .release-please-manifest.json
           git commit \
             -m "docs: consolidate the changelog for ${{ inputs.version }}" \

@@ -15,12 +15,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	secretsstorev1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 
 	"github.com/garoze/muninn/internal/kube"
 	"github.com/garoze/muninn/test/chartutil"
 )
+
+// Pinned rather than tracking latest, matching nightly.yml and the same
+// reasoning every tool in this repository is pinned for: an upstream release
+// should not change what this test exercises without a commit saying so.
+const certManagerVersion = "v1.21.1"
 
 const csiClusterName = "muninn-csi-e2e-test"
 
@@ -51,7 +57,15 @@ func TestCSIE2E(t *testing.T) {
 		_ = exec.Command("kind", "delete", "cluster", "--name", csiClusterName).Run()
 	})
 
-	env := append(os.Environ(), "KUBECONFIG="+kubeconfigPath)
+	// The repositories added below would otherwise land in the caller's own
+	// Helm configuration and stay there after the test, the same reason
+	// test/chartutil builds its dependencies against a throwaway config.
+	helmHome := t.TempDir()
+	env := append(os.Environ(),
+		"KUBECONFIG="+kubeconfigPath,
+		"HELM_REPOSITORY_CONFIG="+filepath.Join(helmHome, "repositories.yaml"),
+		"HELM_REPOSITORY_CACHE="+filepath.Join(helmHome, "cache"),
+	)
 
 	restCfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -120,7 +134,7 @@ EOF
 	loadImageIntoKind(t, repoRoot, csiClusterName)
 
 	// --- cert-manager, then serve + webhook, pointed at this Vault ---
-	runCmd(t, "", env, "kubectl", "apply", "-f", "https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml")
+	runCmd(t, "", env, "kubectl", "apply", "-f", "https://github.com/cert-manager/cert-manager/releases/download/"+certManagerVersion+"/cert-manager.yaml")
 	waitAllPodsReady(t, k8sClient, "cert-manager", 120*time.Second)
 
 	chartutil.EnsureDependencies(t)
@@ -179,6 +193,15 @@ EOF
 		},
 		Spec: corev1.PodSpec{
 			ServiceAccountName: "default",
+			// A non-root consumer, and not the same user the injected
+			// containers run as: this is what makes the assertions below
+			// about reading the config file and the mounted secret mean
+			// something. As root every mode is readable.
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsUser:    ptr.To[int64](12000),
+				RunAsGroup:   ptr.To[int64](12000),
+				RunAsNonRoot: ptr.To(true),
+			},
 			Containers: []corev1.Container{
 				{Name: "app", Image: "busybox:1.36", Command: []string{"sleep", "3600"}},
 			},

@@ -135,7 +135,7 @@ type QueryResult struct {
 }
 
 // ConfigSourceDescriptor describes an active config source (kind, label
-// selector, scope) for the Describe RPC — the only part of a source's shape
+// selector, scope) for the Describe RPC - the only part of a source's shape
 // that's static, since the underlying data has no fixed key vocabulary.
 type ConfigSourceDescriptor struct {
 	Kind          string
@@ -224,7 +224,7 @@ func (s *DiscoveryService) Query(ctx context.Context, namespace string, keys []s
 }
 
 // Resolve returns every key currently resolved for a namespace, without the
-// caller enumerating keys up front — the counterpart to Query for callers
+// caller enumerating keys up front - the counterpart to Query for callers
 // that want everything rather than specific keys.
 //
 // Error Precedence: same as Query, minus strict/missing-keys since there's

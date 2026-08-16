@@ -5,13 +5,16 @@ image:
   # -- Image tag. The default is the floating tag, which moves with every
   # official release.
   tag: latest
+  # The link below is absolute because this block renders into the chart's
+  # README, which ships inside the published chart, where a path relative to
+  # this repository resolves to nothing.
   # -- Digest of the exact image to run, for an install that must match an
   # artifact that was verified. A tag can be moved to point at different
   # content after it was checked, and the default here is the floating one -
   # so a consumer who verified a digest and then installed by tag has
   # verified something other than what runs. Set alongside the tag rather
   # than instead of it: the digest resolves, the tag stays readable. See
-  # docs/verification.md.
+  # https://github.com/Garoze/Muninn/blob/main/docs/verification.md
   digest: ""
 
 webhook:

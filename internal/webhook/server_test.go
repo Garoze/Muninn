@@ -1,6 +1,8 @@
 package webhook
 
 import (
+	"bytes"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -25,7 +27,7 @@ func TestNewServer_BadCertPathErrors(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testSPCScheme(t)).Build()
 	h := NewHandler(zap.NewNop(), cfg, observability.NewMetrics(prometheus.NewRegistry()), svc, c)
 
-	_, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
+	_, _, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
 	if err == nil {
 		t.Fatal("expected an error for nonexistent cert/key paths, got nil")
 	}
@@ -43,15 +45,29 @@ func TestNewServer_ValidCert_ConfiguresServer(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testSPCScheme(t)).Build()
 	h := NewHandler(zap.NewNop(), cfg, observability.NewMetrics(prometheus.NewRegistry()), svc, c)
 
-	srv, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
+	srv, _, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if srv.Addr != cfg.WebhookAddr {
 		t.Errorf("Addr: got %q, want %q", srv.Addr, cfg.WebhookAddr)
 	}
-	if srv.TLSConfig == nil || len(srv.TLSConfig.Certificates) != 1 {
-		t.Error("expected TLSConfig with exactly one certificate loaded")
+	// The certificate is served through the watcher rather than baked into
+	// Certificates, so that a rotation on disk reaches new handshakes without
+	// a restart. Asserting the callback resolves is what proves the wiring;
+	// a non-empty Certificates slice would prove the opposite.
+	if srv.TLSConfig == nil || srv.TLSConfig.GetCertificate == nil {
+		t.Fatal("expected TLSConfig with a GetCertificate callback")
+	}
+	if len(srv.TLSConfig.Certificates) != 0 {
+		t.Error("expected no statically loaded certificates")
+	}
+	cert, err := srv.TLSConfig.GetCertificate(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatalf("GetCertificate: %v", err)
+	}
+	if cert == nil || len(cert.Certificate) == 0 {
+		t.Error("GetCertificate returned no certificate")
 	}
 }
 
@@ -69,7 +85,7 @@ func TestNewServer_ReadyzTracksCacheSync(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testSPCScheme(t)).Build()
 	h := NewHandler(zap.NewNop(), cfg, observability.NewMetrics(prometheus.NewRegistry()), svc, c)
 
-	srv, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
+	srv, _, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -93,5 +109,51 @@ func TestNewServer_ReadyzTracksCacheSync(t *testing.T) {
 
 	if got := get("/readyz"); got != http.StatusOK {
 		t.Errorf("/readyz after sync: got %d, want %d", got, http.StatusOK)
+	}
+}
+
+// The reason the certificate is served through a watcher at all: whoever
+// issues it rotates it before expiry by rewriting the same mounted files, and
+// a process serving the copy it read at startup keeps presenting the old one
+// until it restarts. Past expiry the API server's handshake fails, and under
+// failurePolicy: Fail that blocks Pod creation across every namespace this
+// webhook matches.
+func TestNewServer_ServesRotatedCertificateWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath := generateSelfSignedCert(t, dir)
+	cfg := &config.Config{
+		WebhookAddr:        "127.0.0.1:0",
+		WebhookTLSCertPath: certPath,
+		WebhookTLSKeyPath:  keyPath,
+	}
+	svc := app.NewDiscoveryService(cfg, zap.NewNop(), nil)
+	c := fake.NewClientBuilder().WithScheme(testSPCScheme(t)).Build()
+	h := NewHandler(zap.NewNop(), cfg, observability.NewMetrics(prometheus.NewRegistry()), svc, c)
+
+	srv, watcher, err := NewServer(cfg, h, zap.NewNop(), sdktrace.NewTracerProvider())
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	before, err := srv.TLSConfig.GetCertificate(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatalf("GetCertificate before rotation: %v", err)
+	}
+
+	// Rewrite both files in place, as a rotation does, then have the watcher
+	// re-read them. Reading directly keeps the test off the filesystem-event
+	// timing that the watcher's own goroutine depends on.
+	generateSelfSignedCert(t, dir)
+	if err := watcher.ReadCertificate(); err != nil {
+		t.Fatalf("re-read rotated certificate: %v", err)
+	}
+
+	after, err := srv.TLSConfig.GetCertificate(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatalf("GetCertificate after rotation: %v", err)
+	}
+
+	if bytes.Equal(before.Certificate[0], after.Certificate[0]) {
+		t.Error("server still presents the certificate it started with after rotation")
 	}
 }

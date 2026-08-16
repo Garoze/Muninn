@@ -19,7 +19,7 @@ import (
 const defaultAddr = "localhost:5010"
 
 // printUsage writes the top-level command overview to w. Write errors are
-// discarded — nothing useful to do with one this close to exit.
+// discarded - nothing useful to do with one this close to exit.
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `muninnctl is a CLI client for Muninn's gRPC Query API.
 

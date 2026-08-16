@@ -43,7 +43,7 @@ Rendering the chart puts `helm` on this tier's prerequisites; without it those
 tests skip.
 
 ```bash
-go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.24.1
 export KUBEBUILDER_ASSETS=$(setup-envtest use -p path)
 make test-integration
 ```
@@ -51,10 +51,24 @@ make test-integration
 ## End-to-end
 
 ```bash
-make image load IMG=ghcr.io/garoze/muninn:local   # `make load` requires interactive sudo
-make test-e2e                                      # against an existing cluster
-
+make test-e2e           # against an existing cluster; builds and pushes for you
 make test-e2e-csi       # provisions a disposable kind cluster, then removes it
+```
+
+`make test-e2e` builds the image into a local registry and points the chart
+at it, which needs no root. Importing into k3s's containerd does, because its
+socket is owned by root, and that is the only thing `make load` needs a
+password for. The registry keeps running between runs; `make registry-stop`
+removes it.
+
+This works for a node that shares this host's network namespace, which
+resolves `localhost:5000` to that registry - k3s, `minikube --driver=none`,
+or kind with the port mapped. For a cluster anywhere else, build a tarball
+and load it however that cluster expects, then point the test at the result:
+
+```bash
+make image load IMG=ghcr.io/garoze/muninn:local    # k3s; needs sudo
+MUNINN_E2E_IMAGE=ghcr.io/garoze/muninn:local make test-e2e
 ```
 
 `make test-e2e` installs the chart an operator installs, enabling the webhook
@@ -98,14 +112,15 @@ Two cells: cert-manager already present externally (the common case), and a
 bare cluster exercising the two-phase install the opt-in `cert-manager`/
 `secrets-store-csi-driver` subcharts require. Both install into a
 non-default namespace and delete the webhook Pod, confirming the
-replacement schedules — the case where a hardcoded namespace exclusion in
+replacement schedules - the case where a hardcoded namespace exclusion in
 the `MutatingWebhookConfiguration` would silently fail under
 `failurePolicy: Fail`.
 
 Not yet covered: the wider Kubernetes-version/cert-mode/secrets matrix, and
-upgrading a previously published chart version into the current one — the
-latter has no versioned install path to upgrade *from* until a second real
-chart version is published.
+upgrading a previously published chart version into the current one. Several
+chart versions are published now, so the upgrade case is testable - and it is
+the only route to the self-signed certificate mode's rotation hazard, which
+no tier reaches today.
 
 ## Verified manually
 

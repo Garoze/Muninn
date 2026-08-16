@@ -1,6 +1,6 @@
 # muninn
 
-![Version: 0.2.2](https://img.shields.io/badge/Version-0.2.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.2](https://img.shields.io/badge/AppVersion-0.2.2-informational?style=flat-square)
+![Version: 0.3.1](https://img.shields.io/badge/Version-0.3.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.2.2](https://img.shields.io/badge/AppVersion-0.2.2-informational?style=flat-square)
 
 Kubernetes-native runtime configuration resolver
 
@@ -12,7 +12,7 @@ Kubernetes-native runtime configuration resolver
 
 ## Requirements
 
-Kubernetes: `>=1.27.0-0`
+Kubernetes: `>=1.29.0-0`
 
 | Repository | Name | Version |
 |------------|------|---------|
@@ -25,7 +25,7 @@ Kubernetes: `>=1.27.0-0`
 |-----|------|---------|-------------|
 | image.repository | string | `"ghcr.io/garoze/muninn"` | Repository holding the resolver and webhook image. Both roles run the same image, distinguished by the subcommand they are started with. |
 | image.tag | string | `"latest"` | Image tag. The default is the floating tag, which moves with every official release. |
-| image.digest | string | `""` | Digest of the exact image to run, for an install that must match an artifact that was verified. A tag can be moved to point at different content after it was checked, and the default here is the floating one - so a consumer who verified a digest and then installed by tag has verified something other than what runs. Set alongside the tag rather than instead of it: the digest resolves, the tag stays readable. See docs/verification.md. |
+| image.digest | string | `""` | Digest of the exact image to run, for an install that must match an artifact that was verified. A tag can be moved to point at different content after it was checked, and the default here is the floating one - so a consumer who verified a digest and then installed by tag has verified something other than what runs. Set alongside the tag rather than instead of it: the digest resolves, the tag stays readable. See https://github.com/Garoze/Muninn/blob/main/docs/verification.md |
 | webhook.enabled | bool | `true` | Gates every webhook-* template, including the Certificate/Issuer - false is what a fresh-cluster two-phase install needs for its first pass, when cert-manager.enabled is also being turned on for the first time and its own webhook isn't serving yet. See cert-manager.enabled's comment below for the full two-phase sequence. |
 | webhook.failurePolicy | string | `"Fail"` | Fail blocks Pod creation wherever the webhook applies whenever it's unavailable; Ignore makes injection silently best-effort instead - a cluster operator's risk tolerance to set, not something to hardcode. |
 | webhook.excludedNamespaces | list | `[]` | Namespaces the webhook never applies to. Always unioned with kube-system and .Release.Namespace, never a replacement for them - dropping either reintroduces the deadlock where an unavailable webhook blocks its own replacement Pod from scheduling. |

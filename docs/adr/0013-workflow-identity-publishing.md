@@ -8,7 +8,7 @@ Nothing was published anywhere: the image existed only in one machine's
 local container store, and the manifests referred to it by a name no
 other cluster could resolve. Making the project installable means
 choosing a registry, and choosing a registry immediately raises a second
-question that looks separate and is not — how a consumer knows that what
+question that looks separate and is not - how a consumer knows that what
 they pulled is what this project built.
 
 The two questions share an answer because they share a credential. A
@@ -32,8 +32,8 @@ asserted by the forge's OIDC issuer and recorded in a public transparency
 log. A signature proves that this artifact was produced by that workflow
 at that ref, and that nothing has altered it since.
 
-The same identity signs everything published — the image, the chart, and
-the attestations describing the image — so a consumer learns one identity
+The same identity signs everything published - the image, the chart, and
+the attestations describing the image - so a consumer learns one identity
 and checks every artifact against it.
 
 ## Alternatives considered
@@ -60,7 +60,7 @@ anything about the artifact afterwards.
 
 The identity is part of the published contract. Renaming or moving the
 publishing workflow changes the identity of everything signed afterwards,
-and consumers pinning the old one will fail to verify — a rename is a
+and consumers pinning the old one will fail to verify - a rename is a
 breaking change to verification even though nothing about the artifact
 changed.
 

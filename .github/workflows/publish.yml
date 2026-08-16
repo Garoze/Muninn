@@ -25,6 +25,40 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref_name }}
+      # A tag can be placed on any commit, including one whose checks failed
+      # or never ran, and everything below would sign and attest it just the
+      # same - the signature would be perfectly valid and the artifact would
+      # be one nobody agreed to ship. Tags normally come from a release pull
+      # request that CI already passed, so this is a guard on the unusual
+      # case, not the common one.
+      - name: refuse to publish a commit that did not pass CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          checks() {
+            gh api "repos/${{ github.repository }}/commits/$sha/check-runs" \
+              --jq '.check_runs[] | select(.name != "publish") | "\(.name)=\(.conclusion // "pending")"'
+          }
+
+          # A release cut tags main and dispatches this immediately, so the
+          # push's own checks are usually still running. Wait for them rather
+          # than reading "not finished yet" as "failed".
+          for _ in $(seq 1 40); do
+            conclusions=$(checks)
+            echo "$conclusions" | grep -q "=pending$" || break
+            sleep 15
+          done
+
+          echo "$conclusions"
+          if [ -z "$conclusions" ]; then
+            echo "no check runs found for $sha - refusing to publish an unverified commit" >&2
+            exit 1
+          fi
+          if echo "$conclusions" | grep -qvE "=(success|skipped|neutral)$"; then
+            echo "at least one check on $sha did not succeed" >&2
+            exit 1
+          fi
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod

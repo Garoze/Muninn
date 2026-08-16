@@ -1,11 +1,32 @@
 package config
 
 import (
+	"os"
 	"testing"
 	"time"
 )
 
+// configEnv is every variable New reads. TestNew_Defaults clears all of them,
+// because a developer with any one exported - GRPC_SERVICE_ADDR while running
+// two resolvers, say - would otherwise see this test fail for a reason that
+// has nothing to do with the code.
+var configEnv = []string{
+	"GRPC_SERVICE_ADDR", "GRPC_PROBE_ADDR", "GRPC_TLS_CERT_PATH", "GRPC_TLS_KEY_PATH",
+	"METRICS_ADDR", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_TRACES_SAMPLE_ARG",
+	"KUBE_CONFIG_PATH", "CONFIGMAP_LABEL_SELECTOR", "ENABLED_CONFIG_SOURCES",
+	"CACHE_ENTRY_TTL", "STARTUP_TIMEOUT", "WEBHOOK_ADDR", "WEBHOOK_TLS_CERT_PATH",
+	"WEBHOOK_TLS_KEY_PATH", "MUNINN_INJECT_IMAGE", "MUNINN_SELF_ADDR",
+	"SECRET_SPC_MODE", "VAULT_ADDRESS", "VAULT_ROLE_NAME",
+}
+
 func TestNew_Defaults(t *testing.T) {
+	for _, name := range configEnv {
+		t.Setenv(name, "")
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatalf("unset %s: %v", name, err)
+		}
+	}
+
 	cfg, err := New()
 	if err != nil {
 		t.Fatalf("New: %v", err)

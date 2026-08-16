@@ -62,7 +62,17 @@ the Pod, and is never touched by Muninn.
 
 A Pod opts in through the same `muninn.io/inject: "true"` annotation, and its
 `ServiceAccount` must be bound to a role in the secret store. That binding is
-configured once per namespace, not per secret. The application then reads
+configured once per namespace, not per secret.
+
+> [!IMPORTANT]
+> The role name is a single chart-level value, so every namespace's generated
+> `SecretProviderClass` names the same role, while the path inside it comes
+> from that namespace's own ConfigMap and is not constrained to any prefix.
+> Once that one role is bound to more than one namespace's ServiceAccounts -
+> which is what enabling this feature for more than one namespace requires -
+> any of them can reference any path the role's policy permits, including
+> another namespace's secrets. Scope the policy to what every participating
+> namespace may read, or give each namespace its own release and role. The application then reads
 files:
 
 ```bash

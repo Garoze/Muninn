@@ -79,10 +79,13 @@ This project uses [Conventional Commits](https://www.conventionalcommits.org/):
 - Types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `ci`
 - Scopes: `api`, `app`, `kube`, `transport`, `config`, `ci`, `deps`
 
-`feat`, `fix`, `docs` and `refactor` are visible in the changelog and a
-commit carrying one of them is enough to raise a release. Pipeline
-plumbing that changes nothing a consumer installs belongs under `ci` or
-`chore`, which are hidden.
+The test a type has to pass is whether the commit can change what gets
+published. `feat`, `fix` and `refactor` can, and are visible in the
+changelog; a refactor alters the artifact even when behaviour is
+unchanged. `docs`, `test`, `ci` and `chore` cannot: documentation ships in
+this repository rather than inside the image or the chart, so a
+documentation change leaves both byte-identical. Those are hidden, and
+pipeline plumbing belongs under `ci` or `chore` rather than under `fix`.
 
 ## Pull requests
 
@@ -92,7 +95,7 @@ into independent concerns, open separate PRs rather than bundling them.
 ## Releases
 
 Nothing is released by hand, and every step below publishes through the
-same pipeline under the same identity — see
+same pipeline under the same identity - see
 [`docs/verification.md`](docs/verification.md) for what that identity is
 and how a consumer checks it.
 
@@ -114,8 +117,8 @@ back into `develop`.
 
 That last step matters more than it looks. A `develop` → `main` pull
 request only advances `main`; `develop` never moves, so anything
-committed on `main` — a release's tag and changelog, or a fix applied
-there directly — stays outside `develop`'s history until something merges
+committed on `main` - a release's tag and changelog, or a fix applied
+there directly - stays outside `develop`'s history until something merges
 in the other direction. A push to `main` now opens that merge
 automatically, and both routes exit cleanly when there is nothing to
 bring back.

@@ -22,3 +22,4 @@ listed here, lives in [`../design.md`](../design.md).
 | [0013](0013-workflow-identity-publishing.md) | Artifacts published and signed under a workflow identity, not a stored credential |
 | [0014](0014-chart-as-single-install-path.md) | A packaged chart as the single install path |
 | [0015](0015-opt-in-subcharts.md) | Cluster-singleton prerequisites ship as opt-in dependencies, default off |
+| [0016](0016-two-branch-release-model.md) | A staging branch with published prereleases, and an official release branch |

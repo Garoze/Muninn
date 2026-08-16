@@ -479,9 +479,12 @@ Access to the Kubernetes API is scoped as narrowly as the integration
 model allows, and separately per process. The resolver reads only: watch
 access to exactly the resource type the registered `ConfigSource` needs,
 with no write verbs and no subresources. The webhook holds that same read
-access plus the ability to create and update one derived object type, in
-one namespace at a time, carrying routing information rather than secret
-material (see Secret delivery).
+access plus the ability to create and update one derived object type,
+carrying routing information rather than secret material (see Secret
+delivery). That grant is cluster-wide, because the namespaces it must write
+into are not known ahead of time; what is confined to a single namespace is
+each individual request, which acts only on the namespace the API server
+itself attributes it to.
 
 The runtime environment is hardened independently of any single
 mechanism: both the resolver and the webhook processes run as a
@@ -498,7 +501,7 @@ for the full reasoning.
 access control in effect for direct callers, independent of whether TLS
 is enabled on it. A real deployment of this pattern would additionally
 need to sit behind cluster-internal network policy or an API gateway.
-this is stated as an explicit limitation of the reference implementation,
+This is stated as an explicit limitation of the reference implementation,
 not an oversight.
 
 **gRPC API TLS is configurable and optional, not fixed either way.**
@@ -523,6 +526,26 @@ certificate is issued by an in-cluster certificate authority (not built
 or trusted by this service), with the CA bundle the API server needs to
 validate it kept in sync automatically rather than hand-copied into the
 webhook registration.
+
+**Who may call the webhook is a deployment property, not something the
+webhook asserts.** Its serving certificate proves the webhook's identity
+to the API server; it does not authenticate the caller in the other
+direction, so any client that can route to the Service can present a
+well-formed admission request. The same reasoning applies here as to the
+gRPC API's caller authentication: a cluster establishes that boundary
+where it already establishes every other one - network policy, a service
+mesh, or a gateway that terminates and re-originates the connection - and
+a component that hardcoded mutual TLS would be asserting a topology it
+cannot see, the same mistake as assuming a mesh is or is not present.
+
+What bounds the consequence is what such a request can cause. The
+namespace acted on is the one the API server attributes to the request,
+never a field a caller chooses, and the content of any object written is
+derived entirely from that namespace's own configuration - so a request
+from an unexpected caller can cause work, but cannot introduce data of
+its own or reach across a namespace boundary. Requests are size-bounded
+for the same reason the component's availability matters at all: it sits
+in the Pod creation path, and unavailability there is felt cluster-wide.
 
 No secret value passes through either process in either direction. The
 values a source object carries are configuration data; where a secret is
@@ -675,8 +698,9 @@ A reference is a configuration key carrying a fixed suffix, whose value
 is a URI naming where the real secret lives. Two optional companion keys
 sharing the same prefix complete the convention: one names the field to
 extract from within that secret, and one records the path the value will
-be mounted at, for the consumer's own documentation. Only the reference
-itself is interpreted.
+be mounted at, for the consumer's own documentation. The reference and the
+field selector are both interpreted, since the driver needs each to fetch
+the right value; the mount-path key is documentation and is never read.
 
 **Motivation:** The value never transits or rests inside this system, so
 no part of it needs to be trusted with secret material or capable of
@@ -763,7 +787,7 @@ merely a style preference.
 
 **Alternatives considered:**
 - Include namespace as a metric label for per-scope dashboards.
-  rejected: the cardinality risk outweighs the benefit; per-scope detail
+  Rejected: the cardinality risk outweighs the benefit; per-scope detail
   belongs in traces and logs, which are built for high-cardinality
   dimensions, not in metrics.
 
@@ -785,6 +809,9 @@ extension: deliberately out of scope for now rather than an oversight.
 ## Testing strategy
 
 Four tiers, each validating a different layer of the integration model:
+unit, integration against a real control plane, end-to-end against a
+cluster, and a scheduled run against the published artifacts rather than
+against this source. `testing.md` covers how to run each one.
 
 **Decision:** Validate Kubernetes integration against a real API server
 and control plane, not a fake or mocked client.
@@ -917,7 +944,7 @@ are separate statements, each carried by its own attestation: a
 dependency inventory of the image, and a record naming the workflow,
 repository and commit that built it.
 
-The two attestations are deliberately stored apart — one attached to the
+The two attestations are deliberately stored apart - one attached to the
 image digest in the registry, one held in the forge's own attestation
 store. Written to the same place, the second silently replaces the first,
 and the replacement arrives after publication has already reported
@@ -931,7 +958,7 @@ about isolation between the build and the signing material rather than
 about how much the provenance says: because the build steps and the
 attestation share a job and its token, a compromised build step could in
 principle forge provenance about itself. Describing this accurately
-matters more than claiming the higher level — the claim is falsifiable in
+matters more than claiming the higher level - the claim is falsifiable in
 one question, and the honest version is the more useful answer.
 
 That reasoning is why the automation's own third-party dependencies are
@@ -960,14 +987,20 @@ policy choice on their behalf.
 Every push toward a release publishes: the same pipeline, the same
 identity, the same signing and attestation steps, on a prerelease version
 rather than an official one. That is the point rather than a side effect
-— a release path exercised only at release time is a release path nobody
-has tested — and it is what turned up every defect the first official
+- a release path exercised only at release time is a release path nobody
+has tested - and it is what turned up every defect the first official
 release would otherwise have shipped.
 
 A prerelease is a real, signed, attested artifact with a real version. It
 is not, and must not become, what a floating tag points at: that tag is
 reserved for official releases by matching an exact three-part version,
 not by excluding the prerelease shapes anyone thought to enumerate.
+
+Publishing continuously while keeping the default branch and the floating
+tag free of in-progress work is what the two-branch topology buys, and
+[ADR-0016](adr/0016-two-branch-release-model.md) records what it costs to
+keep those branches consistent - along with the single-branch alternative
+that would remove that cost entirely.
 
 ---
 

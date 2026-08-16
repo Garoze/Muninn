@@ -65,8 +65,9 @@ func TestBuildPatch_FreshPod_AddsVolumeInitSidecarAndAppMount(t *testing.T) {
 	pod := freshPod()
 	ops := BuildPatch(pod, "acme", testConfig(), nil)
 
-	if len(ops) != 4 {
-		t.Fatalf("got %d ops, want 4: %+v", len(ops), ops)
+	// Three, not four: both injected containers share /spec/initContainers.
+	if len(ops) != 3 {
+		t.Fatalf("got %d ops, want 3: %+v", len(ops), ops)
 	}
 	byPath := opsByPath(ops)
 
@@ -84,7 +85,7 @@ func TestBuildPatch_FreshPod_AddsVolumeInitSidecarAndAppMount(t *testing.T) {
 		t.Fatal("missing /spec/initContainers add op")
 	}
 	initContainers, ok := initOp.Value.([]corev1.Container)
-	if !ok || len(initContainers) != 1 {
+	if !ok || len(initContainers) != 2 {
 		t.Fatalf("initContainers op value: got %+v", initOp.Value)
 	}
 	initC := initContainers[0]
@@ -105,17 +106,21 @@ func TestBuildPatch_FreshPod_AddsVolumeInitSidecarAndAppMount(t *testing.T) {
 		t.Errorf("init container args: got %v, want %v", initC.Args, wantInitArgs)
 	}
 
-	containersOp, ok := byPath["/spec/containers"]
-	if !ok || containersOp.Op != "replace" {
-		t.Fatal("missing /spec/containers replace op (sidecar)")
+	// The watching container is a native sidecar: an init container carrying
+	// restartPolicy: Always, ordered after the one-shot resolve. It must not
+	// be an ordinary container, or an annotated Job Pod would never complete.
+	if _, ok := byPath["/spec/containers"]; ok {
+		t.Error("the sidecar must not be added to /spec/containers")
 	}
-	containers, ok := containersOp.Value.([]corev1.Container)
-	if !ok || len(containers) != 2 || containers[0].Name != "app" {
-		t.Fatalf("containers op value: got %+v", containersOp.Value)
-	}
-	sidecar := containers[1]
+	sidecar := initContainers[1]
 	if sidecar.Name != sidecarContainerName {
 		t.Fatalf("sidecar name: got %q, want %q", sidecar.Name, sidecarContainerName)
+	}
+	if sidecar.RestartPolicy == nil || *sidecar.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Errorf("sidecar restartPolicy: got %v, want Always (what makes it a native sidecar)", sidecar.RestartPolicy)
+	}
+	if initC.RestartPolicy != nil {
+		t.Errorf("the one-shot resolve container must not carry a restartPolicy, got %v", *initC.RestartPolicy)
 	}
 	wantSidecarArgs := append(append([]string{}, wantInitArgs...), "--watch", "--interval", sidecarWatchInterval)
 	if !stringSlicesEqual(sidecar.Args, wantSidecarArgs) {
@@ -239,8 +244,9 @@ func TestBuildPatch_ExistingVolumesAndInitContainers_ReplacesWholeField(t *testi
 		t.Fatalf("expected a replace op for /spec/initContainers when initContainers already exist, got %+v", ops)
 	}
 	initContainers := initOp.Value.([]corev1.Container)
-	if len(initContainers) != 2 || initContainers[0].Name != "other-init" || initContainers[1].Name != initContainerName {
-		t.Errorf("expected existing init container preserved plus muninn's appended, got %+v", initContainers)
+	if len(initContainers) != 3 || initContainers[0].Name != "other-init" ||
+		initContainers[1].Name != initContainerName || initContainers[2].Name != sidecarContainerName {
+		t.Errorf("expected the existing init container preserved, then muninn's one-shot resolve, then its native sidecar, got %+v", initContainers)
 	}
 
 	mountOp, ok := byPath["/spec/containers/0/volumeMounts"]
@@ -252,13 +258,10 @@ func TestBuildPatch_ExistingVolumesAndInitContainers_ReplacesWholeField(t *testi
 		t.Errorf("expected existing mount preserved plus muninn-config appended, got %+v", mounts)
 	}
 
-	containersOp, ok := byPath["/spec/containers"]
-	if !ok || containersOp.Op != "replace" {
-		t.Fatalf("expected a replace op for /spec/containers (sidecar addition), got %+v", ops)
-	}
-	containers := containersOp.Value.([]corev1.Container)
-	if len(containers) != 2 || containers[0].Name != "app" || containers[1].Name != sidecarContainerName {
-		t.Errorf("expected existing app container preserved plus sidecar appended, got %+v", containers)
+	// Nothing is appended to /spec/containers: the sidecar is a native one,
+	// so the Pod's own container list is untouched apart from its mounts.
+	if _, ok := byPath["/spec/containers"]; ok {
+		t.Error("expected no op on /spec/containers")
 	}
 }
 
@@ -270,14 +273,11 @@ func TestBuildPatch_AlreadyInjected_IsIdempotent(t *testing.T) {
 			},
 			InitContainers: []corev1.Container{
 				{Name: initContainerName},
+				{Name: sidecarContainerName},
 			},
 			Containers: []corev1.Container{
 				{
 					Name:         "app",
-					VolumeMounts: []corev1.VolumeMount{{Name: volumeName, MountPath: mountPath}},
-				},
-				{
-					Name:         sidecarContainerName,
 					VolumeMounts: []corev1.VolumeMount{{Name: volumeName, MountPath: mountPath}},
 				},
 			},
@@ -459,4 +459,44 @@ func stringSlicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// A Pod's ordinary containers must all exit for the Pod to succeed, so a
+// watching container placed among them keeps an annotated Job or CronJob Pod
+// running forever - the webhook matches every Pod CREATE, and nothing rejects
+// a Job that opts in. As a native sidecar it is excluded from that condition,
+// which is what makes injection safe for a Pod meant to finish.
+func TestBuildPatch_InjectsNothingIntoTheContainersThatMustExit(t *testing.T) {
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever, // as a Job's Pod carries
+			Containers:    []corev1.Container{{Name: "batch"}},
+		},
+	}
+
+	ops := BuildPatch(pod, "acme", testConfig(), nil)
+
+	for _, op := range ops {
+		if op.Path == "/spec/containers" {
+			t.Fatalf("injected into /spec/containers, which a completing Pod waits on: %+v", op)
+		}
+	}
+
+	var injected []corev1.Container
+	for _, op := range ops {
+		if op.Path == "/spec/initContainers" {
+			injected = op.Value.([]corev1.Container)
+		}
+	}
+	if len(injected) != 2 {
+		t.Fatalf("expected both injected containers under /spec/initContainers, got %+v", injected)
+	}
+
+	// Only the watching one restarts; the one-shot resolve has to complete.
+	if injected[0].RestartPolicy != nil {
+		t.Error("the one-shot resolve container must be able to complete")
+	}
+	if injected[1].RestartPolicy == nil || *injected[1].RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Error("the watching container must be a native sidecar")
+	}
 }

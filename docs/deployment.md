@@ -47,17 +47,30 @@ IfNotPresent`, so the Pod uses what was just loaded rather than pulling the
 real image out from under it:
 
 ```bash
+make push                                          # build into a local registry
+make deploy IMG=localhost:5000/muninn:e2e          # install, pointed at that build
+```
+
+`make push` starts a registry on `localhost:5000` and builds straight into
+it, which needs no root. It works wherever the node shares this host's
+network namespace and so resolves that address - k3s, `minikube
+--driver=none`, or kind with the port mapped. `make registry-stop` removes
+the registry.
+
+A cluster that cannot reach it takes the image as a tarball instead:
+
+```bash
 make image IMG=ghcr.io/garoze/muninn:local   # build via ko into bin/image.tar
-make load                                     # import it into k3s's containerd store
+make load                                     # import into k3s's containerd; needs sudo
 make deploy IMG=ghcr.io/garoze/muninn:local   # install, pointed at the local build
 ```
 
 > [!NOTE]
-> `make load` imports into k3s specifically. On another cluster, get
-> `bin/image.tar` onto the nodes however that cluster expects (`minikube
-> image load`, `kind load image-archive`, or push the built image to a
-> registry the cluster can reach), then run `make deploy IMG=<that
-> reference>`.
+> `make load` imports into k3s specifically, and needs root because that
+> containerd's socket is root-owned. On another cluster, get `bin/image.tar`
+> onto the nodes however that cluster expects (`minikube image load`, `kind
+> load image-archive`, or push to a registry it can reach), then run
+> `make deploy IMG=<that reference>`.
 
 ```bash
 kubectl get pods -n muninn-system   # should reach 1/1 Running

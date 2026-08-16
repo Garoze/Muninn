@@ -100,7 +100,7 @@ func startWebhook() (*fx.App, error) {
 }
 
 // printUsage writes the top-level command overview to w. Write errors are
-// discarded — nothing useful to do with one this close to exit.
+// discarded - nothing useful to do with one this close to exit.
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `muninn is the runtime configuration resolver server.
 
@@ -131,7 +131,7 @@ func run() (*fx.App, error) {
 		return startServe()
 	case "webhook":
 		return startWebhook()
-	case "version":
+	case "version", "--version":
 		_, _ = fmt.Fprintln(os.Stdout, version.Version)
 		os.Exit(0)
 	default:
