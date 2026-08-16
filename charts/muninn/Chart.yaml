@@ -4,16 +4,19 @@ description: Kubernetes-native runtime configuration resolver
 type: application
 # Bumped whenever anything under charts/ changes, independently of the
 # application's own version below.
-version: 0.2.4
+version: 0.3.0
 # The application version this chart deploys by default. Stamped at package
 # time from the release being published, so a published chart always states
 # the release it shipped with; the value here is the fallback for a chart
 # built straight from the working tree.
 appVersion: "0.2.2"
-# livenessProbe.grpc (both Deployments) went GA in 1.27; the -0 suffix
-# matters - without it, prerelease-shaped version strings from managed
-# distributions fail the constraint for no good reason.
-kubeVersion: ">=1.27.0-0"
+# The webhook injects its watching container as a native sidecar - an init
+# container carrying restartPolicy: Always - which went GA in 1.29 and is what
+# keeps an annotated Job Pod able to complete. livenessProbe.grpc, the previous
+# floor, went GA in 1.27. The -0 suffix matters: without it, prerelease-shaped
+# version strings from managed distributions fail the constraint for no good
+# reason.
+kubeVersion: ">=1.29.0-0"
 home: https://github.com/Garoze/Muninn
 sources:
   - https://github.com/Garoze/Muninn

@@ -2,7 +2,9 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # develop as well as main: it is where prereleases are tagged from, so a
+    # commit reaching it unchecked can be published.
+    branches: [main, develop]
   pull_request:
 
 concurrency:

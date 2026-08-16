@@ -188,8 +188,15 @@ func TestServeHTTP_AnnotatedPod_InjectsPatch(t *testing.T) {
 		t.Fatal("missing /spec/initContainers op")
 	}
 	var initContainers []corev1.Container
-	if b, err := json.Marshal(initOp.Value); err != nil || json.Unmarshal(b, &initContainers) != nil || len(initContainers) != 1 || initContainers[0].Name != initContainerName {
+	if b, err := json.Marshal(initOp.Value); err != nil || json.Unmarshal(b, &initContainers) != nil ||
+		len(initContainers) != 2 || initContainers[0].Name != initContainerName || initContainers[1].Name != sidecarContainerName {
 		t.Errorf("initContainers op value: got %+v", initOp.Value)
+	}
+	// The watching container is a native sidecar, so it belongs here rather
+	// than among the Pod's own containers, where it would keep an annotated
+	// Job Pod from ever completing.
+	if initContainers[1].RestartPolicy == nil || *initContainers[1].RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Error("sidecar must carry restartPolicy: Always")
 	}
 
 	if _, ok := byPath["/spec/containers/0/volumeMounts"]; !ok {
@@ -547,6 +554,64 @@ func TestServeHTTP_ReconcileFails_DeniesAdmission(t *testing.T) {
 	}
 }
 
+// An annotated Pod whose configuration cannot be resolved must be denied, not
+// admitted uninjected. Admitting it produces a Pod with neither its
+// configuration nor - where the namespace carries secret references - its
+// secrets mount, with nothing in the Pod to say so. The reconcile branch
+// already refuses to degrade that way; this is the same case one step earlier.
+func TestServeHTTP_ResolveFails_DeniesAdmission(t *testing.T) {
+	// A stale cache entry is the reachable resolve failure here: ServeHTTP
+	// gates on IsSynced before this point, so ErrCacheNotSynced cannot occur.
+	cfg := &config.Config{CacheEntryTTL: time.Millisecond}
+	svc := app.NewDiscoveryService(cfg, zap.NewNop(), nil)
+	svc.Cache.Set(&app.ConfigEntry{
+		Namespace: "prod",
+		Sources:   map[string]map[string]any{"ConfigMap/x": {"LOG_LEVEL": "info"}},
+		UpdatedAt: time.Now().Add(-time.Hour),
+	})
+	svc.Cache.SetSynced()
+
+	m := observability.NewMetrics(prometheus.NewRegistry())
+	c := fake.NewClientBuilder().WithScheme(testSPCScheme(t)).Build()
+	h := NewHandler(zap.NewNop(), cfg, m, svc, c)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "my-pod",
+			Annotations: map[string]string{InjectAnnotation: "true"},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app", Image: "example/app:latest"}},
+		},
+	}
+	body := admissionReviewBody(t, "resolve-fail", "prod", pod)
+
+	req := httptest.NewRequest(http.MethodPost, "/mutate", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got status %d, want 200: body=%s", rec.Code, rec.Body.String())
+	}
+
+	var review admissionv1.AdmissionReview
+	if err := json.Unmarshal(rec.Body.Bytes(), &review); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if review.Response == nil || review.Response.Allowed {
+		t.Fatalf("expected Allowed: false, got %+v", review.Response)
+	}
+	if review.Response.Patch != nil {
+		t.Errorf("expected no patch on a denied admission, got %s", review.Response.Patch)
+	}
+	if got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("denied")); got != 1 {
+		t.Errorf("denied count: got %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("error")); got != 0 {
+		t.Errorf("error count: got %v, want 0 (a denial is not a malfunction)", got)
+	}
+}
+
 // TestServeHTTP_AlreadyInjectedPod_NoPatchNoInjectionMetric proves
 // idempotency end-to-end through ServeHTTP, not just at BuildPatch's own
 // level (already covered in inject_test.go): a Pod that's already fully
@@ -567,10 +632,10 @@ func TestServeHTTP_AlreadyInjectedPod_NoPatchNoInjectionMetric(t *testing.T) {
 			},
 			InitContainers: []corev1.Container{
 				{Name: initContainerName},
+				{Name: sidecarContainerName},
 			},
 			Containers: []corev1.Container{
 				{Name: "app", VolumeMounts: []corev1.VolumeMount{{Name: volumeName, MountPath: mountPath}}},
-				{Name: sidecarContainerName, VolumeMounts: []corev1.VolumeMount{{Name: volumeName, MountPath: mountPath}}},
 			},
 		},
 	}
@@ -604,7 +669,10 @@ func TestResolvedValues_NamespaceNotFound_ReturnsEmptyMapNotNil(t *testing.T) {
 	svc.Cache.SetSynced()
 
 	req := httptest.NewRequest(http.MethodPost, "/mutate", nil)
-	got := resolvedValues(req, svc, "nonexistent", zap.NewNop())
+	got, err := resolvedValues(req, svc, "nonexistent")
+	if err != nil {
+		t.Fatalf("unconfigured namespace should not be an error: %v", err)
+	}
 	if got == nil {
 		t.Fatal("expected an empty, non-nil map for an unconfigured namespace, got nil")
 	}
@@ -613,13 +681,14 @@ func TestResolvedValues_NamespaceNotFound_ReturnsEmptyMapNotNil(t *testing.T) {
 	}
 }
 
-// TestResolvedValues_StaleEntry_LogsAndReturnsNil exercises the "genuine
-// resolve error" branch (as opposed to the normal/expected
-// ErrNamespaceNotFound case above) - a stale cache entry, gated by
-// CacheEntryTTL, is the only realistic way to reach it here: ServeHTTP
-// already gates on Cache.IsSynced() before calling resolvedValues, so
-// ErrCacheNotSynced can't occur at this call site.
-func TestResolvedValues_StaleEntry_LogsAndReturnsNil(t *testing.T) {
+// TestResolvedValues_StaleEntry_ReturnsError exercises the "genuine resolve
+// error" branch (as opposed to the normal/expected ErrNamespaceNotFound case
+// above) - a stale cache entry, gated by CacheEntryTTL, is the only realistic
+// way to reach it here: ServeHTTP already gates on Cache.IsSynced() before
+// calling resolvedValues, so ErrCacheNotSynced can't occur at this call site.
+// The error must surface rather than becoming an empty map, since the caller
+// denies admission on it.
+func TestResolvedValues_StaleEntry_ReturnsError(t *testing.T) {
 	cfg := &config.Config{CacheEntryTTL: time.Millisecond}
 	svc := app.NewDiscoveryService(cfg, zap.NewNop(), nil)
 	svc.Cache.Set(&app.ConfigEntry{
@@ -630,9 +699,12 @@ func TestResolvedValues_StaleEntry_LogsAndReturnsNil(t *testing.T) {
 	svc.Cache.SetSynced()
 
 	req := httptest.NewRequest(http.MethodPost, "/mutate", nil)
-	got := resolvedValues(req, svc, "acme", zap.NewNop())
-	if got != nil {
-		t.Errorf("expected nil for a stale cache entry, got %v", got)
+	got, err := resolvedValues(req, svc, "acme")
+	if err == nil {
+		t.Fatalf("expected an error for a stale cache entry, got values %v", got)
+	}
+	if !errors.Is(err, app.ErrCacheEntryStale) {
+		t.Errorf("error: got %v, want ErrCacheEntryStale", err)
 	}
 }
 

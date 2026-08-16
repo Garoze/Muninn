@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/fx"
 	"go.uber.org/zap"
+	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 
 	"github.com/garoze/muninn/internal/config"
 )
@@ -31,13 +32,27 @@ func validateInjectConfig(cfg *config.Config) error {
 	return nil
 }
 
-func startWebhookServer(lc fx.Lifecycle, srv *http.Server, log *zap.Logger) {
+func startWebhookServer(lc fx.Lifecycle, srv *http.Server, watcher *certwatcher.CertWatcher, log *zap.Logger) {
+	// The watcher reloads the certificate from disk when whoever issues it
+	// rotates the mounted files. Its own context is cancelled on stop rather
+	// than the start context, which is already cancelled by the time the
+	// server is serving.
+	watchCtx, stopWatching := context.WithCancel(context.Background())
+
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
 			log.Info("starting webhook server")
 			go func() {
-				// cert/key already loaded into srv.TLSConfig by NewServer,
-				// so both args here are empty.
+				if err := watcher.Start(watchCtx); err != nil {
+					log.Error("webhook certificate watcher failed",
+						zap.Error(err),
+					)
+				}
+			}()
+
+			go func() {
+				// The certificate comes from the watcher via
+				// TLSConfig.GetCertificate, so both args here are empty.
 				if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 					log.Error("webhook server failed",
 						zap.Error(err),
@@ -49,6 +64,7 @@ func startWebhookServer(lc fx.Lifecycle, srv *http.Server, log *zap.Logger) {
 		},
 		OnStop: func(ctx context.Context) error {
 			log.Info("stopping webhook server")
+			stopWatching()
 			return srv.Shutdown(ctx)
 		},
 	})
