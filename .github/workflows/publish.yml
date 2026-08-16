@@ -56,8 +56,10 @@ jobs:
           fi
           echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
       # Platforms come from .ko.yaml's defaultPlatforms, not repeated here.
-      # --image-refs writes one line (first tag + the digest all requested
-      # tags share) - that digest, not any tag, is what gets signed next.
+      # The digest to sign is the index's, taken from ko's stdout: one line
+      # carrying the tagged reference. --image-refs cannot give it, because
+      # for a multi-platform build it lists the index and every child
+      # manifest with nothing distinguishing them.
       # --sbom=none because ko publishes its SBOM as a cosign attachment: an
       # unsigned blob at a derived tag, deprecated in favour of attestations.
       # The SBOM below is attested instead, so it carries an identity.
@@ -67,12 +69,12 @@ jobs:
           KO_DOCKER_REPO: ${{ env.IMAGE }}
           VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
-          ko build ./cmd/muninn --bare --sbom=none \
-            --tags="${{ steps.tags.outputs.tags }}" --image-refs=ko-image-refs.txt \
+          ref=$(ko build ./cmd/muninn --bare --sbom=none \
+            --tags="${{ steps.tags.outputs.tags }}" \
             --image-label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
             --image-label org.opencontainers.image.description="Kubernetes-native runtime configuration resolver" \
-            --image-label org.opencontainers.image.licenses=MIT
-          echo "digest=$(cut -d@ -f2 ko-image-refs.txt)" >> "$GITHUB_OUTPUT"
+            --image-label org.opencontainers.image.licenses=MIT)
+          echo "digest=${ref##*@}" >> "$GITHUB_OUTPUT"
       - name: install cosign
         uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
       # Signs the digest this build step actually produced, not the tag -
