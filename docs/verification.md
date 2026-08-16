@@ -147,19 +147,35 @@ cosign verify ghcr.io/garoze/charts/muninn@"$chart_digest" \
   | jq -r '.[].optional.Subject'
 ```
 
-## Installing a verified chart
+## Installing what was verified
 
-Helm accepts an OCI digest reference, so the digest that was verified can be
-the digest that is installed:
+Helm accepts an OCI digest reference, and the chart accepts a digest for the
+image it deploys, so both halves of an install can be the artifacts that were
+checked:
 
 ```bash
 helm install muninn oci://ghcr.io/garoze/charts/muninn@"$chart_digest" \
-  --namespace muninn-system --create-namespace
+  --namespace muninn-system --create-namespace \
+  --set image.digest="$digest"
 ```
 
 Verifying by version tag and then installing by version tag leaves a window in
-which the tag can move between the two commands. Installing the digest closes
-it.
+which the tag can move between the two commands. Installing the chart digest
+closes it.
+
+The image needs pinning separately. The chart's default `image.tag` is
+`latest`, which moves with every official release, so an install that verified
+an image digest and then accepted that default runs something other than what
+was checked. `image.digest` is set alongside the tag rather than instead of
+it: the digest is what resolves, and the tag stays readable in the rendered
+reference.
+
+> [!IMPORTANT]
+> `image.digest` exists from chart `0.2.1`. Helm accepts a value a chart does
+> not define without complaint, so setting it on an earlier chart silently
+> installs the floating tag instead. Confirm the rendered reference with
+> `helm template ... --set image.digest=...` rather than assuming the flag
+> took effect.
 
 ## What verification establishes, and what it does not
 
@@ -173,29 +189,10 @@ It does not establish:
 - **That the workflow itself is trustworthy.** The identity names the workflow
   file and the tag it ran at. Both are readable in this repository, and
   reading them is part of the check rather than something the check performs.
-- **That the image the chart deploys is the image that was verified.** The two
-  signatures are independent, and no attestation binds one to the other. The
-  chart's default `image.tag` is `latest`, a reference that moves with each
-  official release, so an install that verified a digest and then accepted
-  that default is running something other than what was checked. Closing the
-  half of this that a consumer controls means pinning the verified digest at
-  install time:
-
-  ```bash
-  helm install muninn oci://ghcr.io/garoze/charts/muninn@"$chart_digest" \
-    --namespace muninn-system --create-namespace \
-    --set image.digest="$digest"
-  ```
-
-  Set alongside the tag rather than instead of it: the digest is what
-  resolves, and the tag stays readable in the rendered reference.
-
-  > [!IMPORTANT]
-  > `image.digest` exists from chart `0.2.1`. Helm accepts a value a chart
-  > does not define without complaint, so setting it on an earlier chart
-  > silently installs the floating tag instead. Confirm the rendered
-  > reference with `helm template ... --set image.digest=...` rather than
-  > assuming the flag took effect.
+- **That the image a chart deploys is the image that was verified.** The two
+  signatures are independent and no attestation binds one to the other, so
+  nothing in a verified chart states which image belongs with it. Pinning both
+  digests at install time is a consumer-side substitute, not that binding.
 - **Anything about the chart's contents.** The chart is signed but carries
   neither an SBOM nor provenance, so which images an install pulls onto a
   cluster - including the opt-in cert-manager and CSI driver subcharts - is
