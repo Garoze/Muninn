@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.3](https://github.com/Garoze/Muninn/compare/v0.2.2...v0.2.3) (2026-08-16)
+
+
+### Features
+
+* **chart:** allow the image to be pinned by digest ([ae6ef1c](https://github.com/Garoze/Muninn/commit/ae6ef1c4125869c64c3a093fbd610dde533b5a89))
+
+
+### Bug Fixes
+
+* **ci:** create a merge commit when main is strictly ahead ([25184bd](https://github.com/Garoze/Muninn/commit/25184bd0a513b540b7d51a1145c7f4bbc2ff059d))
+* **ci:** correct main's release state for v0.2.2 ([4a3344d](https://github.com/Garoze/Muninn/commit/4a3344d31a55a3dad1e4df2bee4fca76e7fb2fe5))
+* **ci:** consolidate prerelease entries with no increment ([d9b51e3](https://github.com/Garoze/Muninn/commit/d9b51e32451f5d18934a2281cf042d822e1e55ef))
+
 ## 0.2.2 (2026-08-16)
 
 
@@ -29,6 +43,19 @@
 ### Documentation
 
 * **testing:** correct what rendering the chart adds over its unit tests ([08adb85](https://github.com/Garoze/Muninn/commit/08adb858a55da8850a20c6a78aace96f52cbc882))
+
+## [0.2.1](https://github.com/Garoze/Muninn/compare/v0.2.0...v0.2.1) (2026-08-15)
+
+
+### Features
+
+* **ci:** consolidate the changelog and back-merge main into develop ([85b222e](https://github.com/Garoze/Muninn/commit/85b222ea445c3eff5c312a65cfd47fcf65a91f07))
+
+
+### Bug Fixes
+
+* **docs:** correct CHANGELOG.md's version headings ([d8820f6](https://github.com/Garoze/Muninn/commit/d8820f65bbd74deeed5c7c9a552bdd072508fd37))
+* **ci:** match linked changelog headings when renaming for a release ([805cc38](https://github.com/Garoze/Muninn/commit/805cc38e56e67a3d2cedba3aa9389f9f7cb7ab4e))
 
 ## 0.2.0 (2026-08-15)
 
