@@ -42,14 +42,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # :latest is reserved for an official release cut on main - an alpha
-      # tag from develop always carries -alpha., never gets it
+      # :latest is reserved for an official release cut on main. Matching an
+      # exact vMAJOR.MINOR.PATCH excludes every prerelease shape by
+      # construction; excluding one suffix instead only excludes the shapes
+      # that were thought of, and release-please emits more than one.
       - name: determine image tags
         id: tags
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
           TAGS="$TAG"
-          if [[ "$TAG" != *-alpha.* ]]; then
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             TAGS="$TAGS,latest"
           fi
           echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
