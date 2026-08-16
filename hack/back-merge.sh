@@ -37,8 +37,11 @@ git show "$merge_base:CHANGELOG.md" > /tmp/changelog-base.md 2>/dev/null || : > 
 git show origin/develop:CHANGELOG.md > /tmp/changelog-develop.md
 git show origin/main:CHANGELOG.md > /tmp/changelog-main.md
 
+# --no-ff because main is usually strictly ahead here: a develop -> main
+# merge leaves main carrying the merge commit and develop carrying nothing
+# new, so an ordinary merge fast-forwards and leaves nothing to commit.
 set +e
-git merge origin/main --no-commit -m "Merge main into develop"
+git merge origin/main --no-commit --no-ff -m "Merge main into develop"
 merge_status=$?
 set -e
 
