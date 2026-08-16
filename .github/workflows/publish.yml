@@ -121,23 +121,30 @@ jobs:
         run: |
           cosign attest --yes --type spdxjson --predicate image.spdx.json \
             ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
-      # Both predicate types are checked, after both have been written. A
-      # check that runs between them passes while the artifact it just
-      # verified is about to be overwritten.
+      # The two attestations end up in different places and neither tool sees
+      # both. cosign owns the digest's .att tag, where its last writer wins;
+      # the provenance action also publishes an OCI referrer, and that
+      # survives cosign overwriting .att. Each is therefore checked with the
+      # tool that can read it, after both have been written - a check sitting
+      # between the two passes on an artifact the next step overwrites.
       #
-      # The verification summary goes to stderr and stays in the log; the
-      # payload goes to stdout and is redirected to a file, because cosign
-      # verified in about a second and then never exited with a megabyte of
-      # payload going to the Actions log pipe. The timeout keeps a hang from
-      # holding the job open for hours instead of failing.
-      - name: verify both image attestations
+      # cosign's verification summary goes to stderr and stays in the log;
+      # its payload goes to stdout and is redirected, because cosign verified
+      # in about a second and then never exited with a megabyte of payload
+      # going to the Actions log pipe. The timeouts keep a hang from holding
+      # the job open for hours instead of failing.
+      - name: verify the image attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          for type in spdxjson slsaprovenance; do
-            timeout 120 cosign verify-attestation --type "$type" ${{ env.IMAGE }}@${{ steps.build.outputs.digest }} \
-            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/publish.yml@${{ github.ref }}" \
-            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" > "attestation-$type.json"
-            jq -e '.payload' "attestation-$type.json" > /dev/null
-          done
+          timeout 120 cosign verify-attestation --type spdxjson ${{ env.IMAGE }}@${{ steps.build.outputs.digest }} \
+          --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/publish.yml@${{ github.ref }}" \
+          --certificate-oidc-issuer "https://token.actions.githubusercontent.com" > sbom-attestation.json
+          jq -e '.payload' sbom-attestation.json > /dev/null
+          timeout 120 gh attestation verify "oci://${{ env.IMAGE }}@${{ steps.build.outputs.digest }}" \
+            --repo ${{ github.repository }} --format json > provenance-attestation.json
+          jq -e '.[0].verificationResult.statement.predicateType == "https://slsa.dev/provenance/v1"' \
+            provenance-attestation.json > /dev/null
       # These repos are only needed to vendor the opt-in subchart archives
       # into the package below - the chart's own version is independent of
       # this tag and comes from Chart.yaml, unrelated to the image tags above.
