@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2-alpha.1](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha...v0.2.2-alpha.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **ci:** take the digest to sign from ko's stdout ([30232eb](https://github.com/Garoze/Muninn/commit/30232eb94a12f8f8e3f6aa70c481619361c5a8f2))
+
 ## [0.2.2-alpha](https://github.com/Garoze/Muninn/compare/v0.2.1...v0.2.2-alpha) (2026-08-16)
 
 
