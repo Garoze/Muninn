@@ -36,6 +36,10 @@ changes.
 | `.github/workflows` | CI, publishing, the release cut, the back-merge, and the nightly |
 | `hack/` | scripts the release workflows call, with their fixtures |
 
+The chart's `README.md` is generated from `values.yaml`'s comments by
+`make chart-docs`, and CI fails if it is out of date. Document a value by
+commenting it in `values.yaml`, never by editing the README.
+
 The domain layer imports no Kubernetes or gRPC types, and a change that
 introduces one there belongs at an edge instead. [`docs/design.md`](docs/design.md)
 covers why the boundary sits where it does.

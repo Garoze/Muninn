@@ -3,6 +3,7 @@ CMD_DIR     := cmd
 BIN_DIR     := bin
 SAMPLES_DIR := config/samples
 CHART_DIR   := charts/muninn
+HELM_DOCS_VERSION := v1.14.2
 PROTO_DIR   := proto
 PROTO_SRC   := $(PROTO_DIR)/v1
 
@@ -162,6 +163,16 @@ describe: ## List the active configuration sources
 # Chart.lock does not churn.
 chart-deps: ## Vendor the chart's subchart archives
 	helm dependency update $(CHART_DIR)
+
+# The chart's README is generated from values.yaml's comments, so the values
+# and their documentation cannot drift apart: there is only one copy of the
+# text. CI regenerates and fails on a diff, which is what makes that true
+# rather than merely intended. Pinned rather than @latest, same reasoning as
+# every other tool here; --skip-version-footer keeps a helm-docs bump from
+# rewriting the file with no content change.
+chart-docs: ## Regenerate the chart's README from values.yaml
+	go install github.com/norwoodj/helm-docs/cmd/helm-docs@$(HELM_DOCS_VERSION)
+	helm-docs --chart-search-root $(CHART_DIR) --sort-values-order file --skip-version-footer
 
 # install or upgrade the chart against the cluster in $KUBECONFIG. Both roles
 # come from one release, so the webhook is a value rather than a second
