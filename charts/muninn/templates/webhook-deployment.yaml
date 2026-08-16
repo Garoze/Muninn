@@ -23,7 +23,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: muninn-webhook
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ include "muninn.image" . }}"
           args: ["webhook"]
           ports:
             - name: https
@@ -31,7 +31,7 @@ spec:
               protocol: TCP
           env:
             - name: MUNINN_INJECT_IMAGE
-              value: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              value: "{{ include "muninn.image" . }}"
             - name: MUNINN_SELF_ADDR
               value: muninn.{{ .Release.Namespace }}.svc.cluster.local:5010
             {{- if .Values.secrets.enabled }}

@@ -884,6 +884,93 @@ at all.
 
 ---
 
+## Distribution and release
+
+A resolver nobody can install is a design exercise. The reasoning below
+covers how the built artifacts reach a cluster and what a consumer can
+establish about them on arrival; the commands themselves are in the
+verification documentation, and the mechanics of cutting a release are in
+the contributor guide.
+
+### One identity behind everything published
+
+Publishing and signing are treated as a single decision rather than two.
+Both need a credential, and a stored one fails silently in the same way:
+an artifact pushed with a stolen registry password, or signed with a
+stolen key, is indistinguishable from a legitimate one. Publishing under
+the identity the release automation is issued for its own run removes the
+stored credential entirely, and makes the thing a consumer pins an
+identity rather than a key. See
+[ADR-0013](adr/0013-workflow-identity-publishing.md).
+
+The consequence worth internalizing is that the identity is part of the
+published contract. Moving or renaming the automation that publishes
+changes the identity of everything signed afterwards, and a consumer
+pinning the old one sees a verification failure for an artifact that is
+otherwise perfectly good.
+
+### Three claims, three mechanisms
+
+A signature answers *who published this*. It does not answer what the
+artifact contains, and it does not answer what source produced it. Those
+are separate statements, each carried by its own attestation: a
+dependency inventory of the image, and a record naming the workflow,
+repository and commit that built it.
+
+The two attestations are deliberately stored apart — one attached to the
+image digest in the registry, one held in the forge's own attestation
+store. Written to the same place, the second silently replaces the first,
+and the replacement arrives after publication has already reported
+success, so no check inside the release job can observe it. The scheduled
+installation tier verifies the published artifacts long after the fact
+for exactly this reason: a green release is not evidence that what it
+produced survived.
+
+Build provenance here reaches SLSA Build L2, not L3. The distinction is
+about isolation between the build and the signing material rather than
+about how much the provenance says: because the build steps and the
+attestation share a job and its token, a compromised build step could in
+principle forge provenance about itself. Describing this accurately
+matters more than claiming the higher level — the claim is falsifiable in
+one question, and the honest version is the more useful answer.
+
+That reasoning is why the automation's own third-party dependencies are
+pinned to immutable references. Provenance attests to what a workflow
+built; it says nothing about whether that workflow ran the code its
+author intended, and a mutable reference in the job that holds the
+signing identity is the shortest path to a perfectly verifiable artifact
+nobody intended to publish.
+
+### What signing does not reach
+
+The chart is signed, and nothing more: no inventory, no provenance, and
+no binding to the image it deploys. A consumer who verifies both artifacts
+still has no cryptographic statement connecting them, and the chart's own
+default image reference is a moving tag rather than a digest. This is a
+real gap, recorded rather than papered over, and it bounds what the
+verification documentation is able to claim.
+
+Nothing enforces any of this at install or admission time either.
+Refusing an unsigned artifact is an admission-control decision belonging
+to the cluster operator, and a chart that imposed it would be making a
+policy choice on their behalf.
+
+### Versions, and what a prerelease means
+
+Every push toward a release publishes: the same pipeline, the same
+identity, the same signing and attestation steps, on a prerelease version
+rather than an official one. That is the point rather than a side effect
+— a release path exercised only at release time is a release path nobody
+has tested — and it is what turned up every defect the first official
+release would otherwise have shipped.
+
+A prerelease is a real, signed, attested artifact with a real version. It
+is not, and must not become, what a floating tag points at: that tag is
+reserved for official releases by matching an exact three-part version,
+not by excluding the prerelease shapes anyone thought to enumerate.
+
+---
+
 ## Decisions not taken
 
 Some paths were deliberately not built, and are recorded here for the

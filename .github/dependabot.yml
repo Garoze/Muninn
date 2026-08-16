@@ -5,6 +5,11 @@ updates:
   # only trades that risk for a stale one, so the two ship together.
   - package-ecosystem: github-actions
     directory: /
+    # Dependabot targets the default branch unless told otherwise, and main is
+    # the released branch: a bump merged there is invisible to develop until
+    # the next back-merge, and reaches a release without CI or an alpha having
+    # run the workflows it changes.
+    target-branch: develop
     schedule:
       interval: weekly
     commit-message:

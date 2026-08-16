@@ -2,6 +2,8 @@
 
 - [`deployment.md`](deployment.md): running the resolver and the admission
   webhook in a cluster, and what each one requires.
+- [`verification.md`](verification.md): checking the signatures on the
+  published image and chart, and what a passing check does not establish.
 - [`api.md`](api.md): the gRPC surface, `muninnctl`, and calling it with
   `grpcurl`.
 - [`secret-references.md`](secret-references.md): the secret reference

@@ -82,8 +82,17 @@ checkout, onto a disposable k3s cluster (`k3d`). This is the only tier that
 tests the published artifact rather than the source: a chart that renders
 correctly but references an image tag that was never pushed, a GHCR package
 flipped back to private, or a chart version whose OCI push didn't match
-`Chart.yaml` are all invisible to every other tier. Both signatures are
-verified before anything is installed.
+`Chart.yaml` are all invisible to every other tier. Both signatures and both
+of the image's attestations are verified before anything is installed.
+
+Attestations are checked here rather than only at publication because the
+release job cannot prove one survived. An attestation attached to an image
+digest can be replaced after the job that produced it has already reported
+success, which is a failure no green release can observe. This tier reads
+the published artifact long after the fact, which is the only position from
+which that is visible. The two are read with different tools: the SBOM is
+attached to the image digest, provenance lives in this repository's
+attestation store.
 
 Two cells: cert-manager already present externally (the common case), and a
 bare cluster exercising the two-phase install the opt-in `cert-manager`/

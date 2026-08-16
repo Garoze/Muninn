@@ -1,92 +1,109 @@
 image:
+  # -- Repository holding the resolver and webhook image. Both roles run the
+  # same image, distinguished by the subcommand they are started with.
   repository: ghcr.io/garoze/muninn
+  # -- Image tag. The default is the floating tag, which moves with every
+  # official release.
   tag: latest
+  # -- Digest of the exact image to run, for an install that must match an
+  # artifact that was verified. A tag can be moved to point at different
+  # content after it was checked, and the default here is the floating one -
+  # so a consumer who verified a digest and then installed by tag has
+  # verified something other than what runs. Set alongside the tag rather
+  # than instead of it: the digest resolves, the tag stays readable. See
+  # docs/verification.md.
+  digest: ""
 
 webhook:
-  # Gates every webhook-* template, including the Certificate/Issuer -
+  # -- Gates every webhook-* template, including the Certificate/Issuer -
   # false is what a fresh-cluster two-phase install needs for its first
   # pass, when cert-manager.enabled is also being turned on for the first
   # time and its own webhook isn't serving yet. See cert-manager.enabled's
   # comment below for the full two-phase sequence.
   enabled: true
-  # Fail blocks Pod creation wherever the webhook applies whenever it's
+  # -- Fail blocks Pod creation wherever the webhook applies whenever it's
   # unavailable; Ignore makes injection silently best-effort instead - a
   # cluster operator's risk tolerance to set, not something to hardcode.
   failurePolicy: Fail
-  # Always unioned with kube-system and .Release.Namespace, never a
-  # replacement for them - dropping either reintroduces the deadlock where
-  # an unavailable webhook blocks its own replacement Pod from scheduling.
+  # -- Namespaces the webhook never applies to. Always unioned with
+  # kube-system and .Release.Namespace, never a replacement for them -
+  # dropping either reintroduces the deadlock where an unavailable webhook
+  # blocks its own replacement Pod from scheduling.
   excludedNamespaces: []
 
 certificate:
-  # cert-manager: today's verified behavior; requires cert-manager already
-  #   installed (external prerequisite, not managed by this chart).
-  # self-signed: the chart generates a CA and serving cert itself - zero
-  #   prerequisites, but see webhook-certificate-selfsigned.yaml for the
-  #   rotation hazard this carries on every helm upgrade.
-  # provided: bring your own PKI - supply an existing Secret and CA bundle.
+  # -- Where the webhook's serving certificate comes from. cert-manager:
+  # today's verified behavior; requires cert-manager already installed
+  # (external prerequisite, not managed by this chart). self-signed: the
+  # chart generates a CA and serving cert itself - zero prerequisites, but
+  # see webhook-certificate-selfsigned.yaml for the rotation hazard this
+  # carries on every helm upgrade. provided: bring your own PKI - supply an
+  # existing Secret and CA bundle.
   mode: cert-manager
-  # The Secret holding the serving cert - consistent across all three modes.
-  # cert-manager writes it, self-signed generates it, provided expects it to
-  # already exist under this name.
+  # -- The Secret holding the serving cert - consistent across all three
+  # modes. cert-manager writes it, self-signed generates it, provided
+  # expects it to already exist under this name.
   secretName: muninn-webhook-tls
   provided:
+    # -- PEM-encoded CA bundle the API server should trust, base64 encoded.
+    # Required by, and only read in, the provided mode.
     caBundle: ""
 
 secrets:
-  # Off by default: the Create mode below needs a create/patch grant on
-  # SecretProviderClass in arbitrary consumer namespaces, which is exactly
-  # what Reference mode exists to avoid - it must not be granted unasked.
+  # -- Grants the webhook what secret delivery needs. Off by default: the
+  # Create mode below needs a create/patch grant on SecretProviderClass in
+  # arbitrary consumer namespaces, which is exactly what Reference mode
+  # exists to avoid - it must not be granted unasked.
   enabled: false
-  # Create: the webhook generates the SecretProviderClass itself, needing
+  # -- Create: the webhook generates the SecretProviderClass itself, needing
   # create/patch RBAC. Reference: a pre-provisioned SecretProviderClass is
   # expected and only validated, needing get RBAC alone.
   spcMode: Create
   vault:
+    # -- Address the CSI driver's Vault provider reaches Vault on. Read by
+    # the generated SecretProviderClass, never by the resolver itself.
     address: http://vault.kube-system:8200
+    # -- Vault role the driver authenticates as when fetching a referenced
+    # secret.
     roleName: muninn
 
-# Opt-in dependency: installs cert-manager itself. Off by default - the
-# verified configuration is a cluster that already has cert-manager
-# installed separately (the common case), which needs nothing here at all.
-#
-# Two things to know before turning this on:
-#
-# Subcharts install into this release's namespace, not their own
-# conventional one - cert-manager normally lives in a `cert-manager`
-# namespace; as a dependency here it lands in .Release.Namespace instead.
-# It still works (cert-manager has no semantic dependency on its own
-# namespace name), but a cluster whose cert-manager arrived this way has it
-# somewhere unexpected. `helm uninstall` also then removes cert-manager
-# along with everything else on the cluster that came to depend on it -
-# default-off contains that to whoever explicitly opted in.
-#
-# A fresh cluster needs a two-phase install: cert-manager's own webhook
-# must be serving before Muninn's own Certificate can be admitted, and
-# Helm's install ordering has no concept of that dependency between two
-# separate charts.
-#   helm install muninn ./charts/muninn --set cert-manager.enabled=true --set webhook.enabled=false --wait
-#   helm upgrade muninn ./charts/muninn --set cert-manager.enabled=true
-# A single-pass install with webhook.enabled=true races cert-manager's own
-# webhook coming up and fails; running it as two commands isn't optional on
-# a fresh cluster.
 cert-manager:
+  # -- Installs cert-manager itself as a dependency. Off by default - the
+  # verified configuration is a cluster that already has cert-manager
+  # installed separately (the common case), which needs nothing here at all.
+  # Two things to know before turning this on. Subcharts install into this
+  # release's namespace, not their own conventional one - cert-manager
+  # normally lives in a `cert-manager` namespace; as a dependency here it
+  # lands in .Release.Namespace instead. It still works (cert-manager has no
+  # semantic dependency on its own namespace name), but a cluster whose
+  # cert-manager arrived this way has it somewhere unexpected. `helm
+  # uninstall` also then removes cert-manager along with everything else on
+  # the cluster that came to depend on it - default-off contains that to
+  # whoever explicitly opted in. And a fresh cluster needs a two-phase
+  # install: cert-manager's own webhook must be serving before Muninn's own
+  # Certificate can be admitted, and Helm's install ordering has no concept
+  # of that dependency between two separate charts.
+  # `helm install muninn ./charts/muninn --set cert-manager.enabled=true --set webhook.enabled=false --wait`
+  # then `helm upgrade muninn ./charts/muninn --set cert-manager.enabled=true`.
+  # A single-pass install with webhook.enabled=true races cert-manager's own
+  # webhook coming up and fails; running it as two commands isn't optional
+  # on a fresh cluster.
   enabled: false
   crds:
+    # -- Installs cert-manager's own custom resource definitions with it.
+    # Helm never upgrades definitions installed this way.
     enabled: true
 
-# Opt-in dependency: installs secrets-store-csi-driver. Off by default - a
-# cluster that already runs the driver gets nothing extra. Same
-# subchart-namespace caveat as cert-manager above, but the ordering hazard
-# is milder: nothing at install time depends on the driver being ready,
-# since the webhook only touches a SecretProviderClass at admission, for
-# namespaces whose config actually carries secret references - a driver
-# still starting up when the chart finishes installing causes no install
-# failure, only a wait for the first affected Pod.
-#
-# Vault itself is never installed by this chart, on or off - it's a
-# stateful secrets backend the operator owns, not infrastructure Muninn
-# integrates with. See test/e2e/csi_e2e_test.go for a working dev-mode
-# topology reference.
 secrets-store-csi-driver:
+  # -- Installs secrets-store-csi-driver as a dependency. Off by default - a
+  # cluster that already runs the driver gets nothing extra. Same
+  # subchart-namespace caveat as cert-manager above, but the ordering hazard
+  # is milder: nothing at install time depends on the driver being ready,
+  # since the webhook only touches a SecretProviderClass at admission, for
+  # namespaces whose config actually carries secret references - a driver
+  # still starting up when the chart finishes installing causes no install
+  # failure, only a wait for the first affected Pod. Vault itself is never
+  # installed by this chart, on or off - it's a stateful secrets backend the
+  # operator owns, not infrastructure Muninn integrates with. See
+  # test/e2e/csi_e2e_test.go for a working dev-mode topology reference.
   enabled: false

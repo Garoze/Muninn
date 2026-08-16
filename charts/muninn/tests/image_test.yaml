@@ -1,0 +1,46 @@
+suite: image reference
+templates:
+  - manager-deployment.yaml
+  - webhook-deployment.yaml
+tests:
+  - it: uses the tag alone by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/garoze/muninn:latest
+
+  # A digest set alongside the tag is the case a consumer who verified an
+  # artifact ends up in: the digest is what resolves, the tag survives as
+  # the readable part of the reference.
+  - it: combines the tag and the digest when both are set
+    set:
+      image.digest: sha256:f4c09051aa85d89e67148ef52b8929f89c298a3a87b98a9a46766d8fe2269115
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/garoze/muninn:latest@sha256:f4c09051aa85d89e67148ef52b8929f89c298a3a87b98a9a46766d8fe2269115
+
+  - it: uses the digest alone when the tag is cleared
+    set:
+      image.tag: ""
+      image.digest: sha256:f4c09051aa85d89e67148ef52b8929f89c298a3a87b98a9a46766d8fe2269115
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/garoze/muninn@sha256:f4c09051aa85d89e67148ef52b8929f89c298a3a87b98a9a46766d8fe2269115
+
+  # The injected containers run the same image as the webhook itself, and a
+  # container cannot read its own image through the Downward API - so the
+  # env var is computed from the same values and has to stay identical
+  # under every combination, not only the default one.
+  - it: MUNINN_INJECT_IMAGE tracks a digest-pinned image
+    templates:
+      - webhook-deployment.yaml
+    set:
+      image.digest: sha256:f4c09051aa85d89e67148ef52b8929f89c298a3a87b98a9a46766d8fe2269115
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[0]
+          value:
+            name: MUNINN_INJECT_IMAGE
+            value: ghcr.io/garoze/muninn:latest@sha256:f4c09051aa85d89e67148ef52b8929f89c298a3a87b98a9a46766d8fe2269115

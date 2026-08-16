@@ -40,6 +40,10 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
+      # These run once per release against real history, where a defect is
+      # awkward to undo, and no other tier exercises them.
+      - name: release scripts
+        run: python3 hack/consolidate_changelog_test.py
       # A tag is a mutable reference, and one of these workflows holds the
       # identity that signs releases. The trailing version comment is what
       # keeps the pin readable and what Dependabot rewrites on a bump.
@@ -129,6 +133,14 @@ jobs:
         run: helm plugin install https://github.com/helm-unittest/helm-unittest --version v0.8.2 --verify=false
       - name: helm unittest
         run: helm unittest charts/muninn
+      # The chart's README is generated from values.yaml's comments. A values
+      # change without a regenerated README is the drift this exists to
+      # prevent, so the check is a regeneration and a diff rather than a
+      # reviewer noticing.
+      - name: chart README is current
+        run: |
+          make chart-docs
+          git diff --exit-code -- charts/muninn/README.md
       - name: install kubeconform
         run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
       # ct lint's own dependency build needs these repos registered with
