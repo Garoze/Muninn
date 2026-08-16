@@ -479,9 +479,12 @@ Access to the Kubernetes API is scoped as narrowly as the integration
 model allows, and separately per process. The resolver reads only: watch
 access to exactly the resource type the registered `ConfigSource` needs,
 with no write verbs and no subresources. The webhook holds that same read
-access plus the ability to create and update one derived object type, in
-one namespace at a time, carrying routing information rather than secret
-material (see Secret delivery).
+access plus the ability to create and update one derived object type,
+carrying routing information rather than secret material (see Secret
+delivery). That grant is cluster-wide, because the namespaces it must write
+into are not known ahead of time; what is confined to a single namespace is
+each individual request, which acts only on the namespace the API server
+itself attributes it to.
 
 The runtime environment is hardened independently of any single
 mechanism: both the resolver and the webhook processes run as a
@@ -498,7 +501,7 @@ for the full reasoning.
 access control in effect for direct callers, independent of whether TLS
 is enabled on it. A real deployment of this pattern would additionally
 need to sit behind cluster-internal network policy or an API gateway.
-this is stated as an explicit limitation of the reference implementation,
+This is stated as an explicit limitation of the reference implementation,
 not an oversight.
 
 **gRPC API TLS is configurable and optional, not fixed either way.**
@@ -764,7 +767,7 @@ merely a style preference.
 
 **Alternatives considered:**
 - Include namespace as a metric label for per-scope dashboards.
-  rejected: the cardinality risk outweighs the benefit; per-scope detail
+  Rejected: the cardinality risk outweighs the benefit; per-scope detail
   belongs in traces and logs, which are built for high-cardinality
   dimensions, not in metrics.
 
@@ -786,6 +789,9 @@ extension: deliberately out of scope for now rather than an oversight.
 ## Testing strategy
 
 Four tiers, each validating a different layer of the integration model:
+unit, integration against a real control plane, end-to-end against a
+cluster, and a scheduled run against the published artifacts rather than
+against this source. `testing.md` covers how to run each one.
 
 **Decision:** Validate Kubernetes integration against a real API server
 and control plane, not a fake or mocked client.

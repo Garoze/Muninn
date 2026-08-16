@@ -24,7 +24,7 @@ func newDiscoveryHandler(svc *app.DiscoveryService, metrics *observability.Metri
 	return &DiscoveryHandler{
 		Service: svc,
 		Metrics: metrics,
-		Logger:  log,
+		Logger:  log.Named("grpc"),
 	}
 }
 

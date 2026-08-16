@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -34,7 +35,10 @@ func NewLogger() (*zap.Logger, error) {
 func StartMetricsServer(lc fx.Lifecycle, cfg *config.Config, log *zap.Logger) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	srv := &http.Server{Addr: cfg.MetricsAddr, Handler: mux}
+	// ReadHeaderTimeout bounds a client that opens a connection and sends
+	// headers slowly or never; without it such a connection is held open
+	// indefinitely.
+	srv := &http.Server{Addr: cfg.MetricsAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {

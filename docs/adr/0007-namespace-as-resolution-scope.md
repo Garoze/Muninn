@@ -46,4 +46,6 @@ A multi-tenant deployment (one namespace per tenant, a labeled ConfigMap
 in each) composes with this cleanly, since it needs nothing from Muninn
 beyond what any other multi-namespace usage already gets: the cache's
 namespace-keyed isolation is unit-tested against multiple distinct
-namespaces, and the README demonstrates the same pattern end to end.
+namespaces. The README's own walkthrough uses a single namespace, since
+the multi-tenant arrangement is a consumer's convention rather than
+behaviour this project implements.

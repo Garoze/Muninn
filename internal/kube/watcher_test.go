@@ -43,8 +43,12 @@ func (f *fakeSource) KeyPrefix() string {
 	}
 	return f.kind
 }
-func (f *fakeSource) Watch() client.Object                   { return &corev1.Secret{} }
-func (f *fakeSource) List() client.ObjectList                { return &corev1.SecretList{} }
+
+// Deliberately not a Secret type: nothing in this repository watches one, and
+// a fixture that did would be the only hit for it in the tree - a false
+// positive for anyone checking that invariant by searching.
+func (f *fakeSource) Watch() client.Object                   { return &corev1.ServiceAccount{} }
+func (f *fakeSource) List() client.ObjectList                { return &corev1.ServiceAccountList{} }
 func (f *fakeSource) LabelSelector() string                  { return f.labelSelector }
 func (f *fakeSource) Scope() string                          { return "namespace" }
 func (f *fakeSource) Extract(_ client.Object) map[string]any { return f.data }
@@ -349,7 +353,7 @@ func TestOnSourceUpsert_DifferentKindsDoNotCollide(t *testing.T) {
 		ObjectMeta: objectMeta("ns1", "same-name", "1"),
 		Data:       map[string]string{"LOG_LEVEL": "info"},
 	})
-	w.onSourceUpsert(fake)(&corev1.Secret{ObjectMeta: objectMeta("ns1", "same-name", "1")})
+	w.onSourceUpsert(fake)(&corev1.ServiceAccount{ObjectMeta: objectMeta("ns1", "same-name", "1")})
 
 	entry := w.appCache.Get("ns1")
 	if entry == nil {

@@ -131,7 +131,7 @@ func run() (*fx.App, error) {
 		return startServe()
 	case "webhook":
 		return startWebhook()
-	case "version":
+	case "version", "--version":
 		_, _ = fmt.Fprintln(os.Stdout, version.Version)
 		os.Exit(0)
 	default:

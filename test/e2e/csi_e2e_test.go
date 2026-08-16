@@ -22,6 +22,11 @@ import (
 	"github.com/garoze/muninn/test/chartutil"
 )
 
+// Pinned rather than tracking latest, matching nightly.yml and the same
+// reasoning every tool in this repository is pinned for: an upstream release
+// should not change what this test exercises without a commit saying so.
+const certManagerVersion = "v1.21.1"
+
 const csiClusterName = "muninn-csi-e2e-test"
 
 // TestCSIE2E is the automated form of the CSI secret-delivery runbook,
@@ -51,7 +56,15 @@ func TestCSIE2E(t *testing.T) {
 		_ = exec.Command("kind", "delete", "cluster", "--name", csiClusterName).Run()
 	})
 
-	env := append(os.Environ(), "KUBECONFIG="+kubeconfigPath)
+	// The repositories added below would otherwise land in the caller's own
+	// Helm configuration and stay there after the test, the same reason
+	// test/chartutil builds its dependencies against a throwaway config.
+	helmHome := t.TempDir()
+	env := append(os.Environ(),
+		"KUBECONFIG="+kubeconfigPath,
+		"HELM_REPOSITORY_CONFIG="+filepath.Join(helmHome, "repositories.yaml"),
+		"HELM_REPOSITORY_CACHE="+filepath.Join(helmHome, "cache"),
+	)
 
 	restCfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 	if err != nil {
@@ -120,7 +133,7 @@ EOF
 	loadImageIntoKind(t, repoRoot, csiClusterName)
 
 	// --- cert-manager, then serve + webhook, pointed at this Vault ---
-	runCmd(t, "", env, "kubectl", "apply", "-f", "https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml")
+	runCmd(t, "", env, "kubectl", "apply", "-f", "https://github.com/cert-manager/cert-manager/releases/download/"+certManagerVersion+"/cert-manager.yaml")
 	waitAllPodsReady(t, k8sClient, "cert-manager", 120*time.Second)
 
 	chartutil.EnsureDependencies(t)
