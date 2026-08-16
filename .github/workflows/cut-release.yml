@@ -24,7 +24,7 @@ jobs:
             echo "version must look like vX.Y.Z with no prerelease suffix (got: ${{ inputs.version }})" >&2
             exit 1
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       # develop's CHANGELOG.md accumulates one heading per alpha
@@ -101,6 +101,13 @@ jobs:
       # manifest to the version just cut makes the next alpha compute above
       # it, the same way "sync with the changelog update" keeps main's tip
       # accurate after the step before it.
+      #
+      # It must be a version that was actually tagged. Seeding an untagged
+      # one (X.Y.Z+1-alpha.0, to force the first alpha of a cycle to carry
+      # an increment) leaves release-please with no release to anchor the
+      # changelog range on, and it regenerates the entire history into the
+      # next entry. A bare -alpha for the first alpha of each cycle is the
+      # accepted cost; alphas after it increment normally.
       - name: resync develop's release-please manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -12,12 +12,12 @@ jobs:
       # A PR/tag from the default GITHUB_TOKEN doesn't trigger other
       # workflows - GitHub's loop-prevention rule - so this authenticates as
       # a GitHub App instead, which isn't subject to it.
-      - uses: actions/create-github-app-token@v1
+      - uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
         id: app-token
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         with:
           token: ${{ steps.app-token.outputs.token }}
           target-branch: develop

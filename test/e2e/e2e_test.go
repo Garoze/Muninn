@@ -31,6 +31,7 @@ import (
 
 	discoveryv1 "github.com/garoze/muninn/gen/discovery/v1"
 	"github.com/garoze/muninn/internal/kube"
+	"github.com/garoze/muninn/test/chartutil"
 )
 
 const (
@@ -38,12 +39,15 @@ const (
 	localPort       = 15010 // distinct from `make run`'s default port
 	podPort         = 5010
 	e2eNamespace    = "chiba"
+	helmRelease     = "muninn"
 
 	// A non-"latest" tag defaults to imagePullPolicy: IfNotPresent, so the
 	// deployed Pod uses this locally-loaded build rather than re-pulling
-	// the real published image under the same tag `make deploy` would
-	// otherwise reference by default.
-	localImage = "ghcr.io/garoze/muninn:local"
+	// the real published image under the same tag the chart's default
+	// values would otherwise reference.
+	localImageRepo = "ghcr.io/garoze/muninn"
+	localImageTag  = "local"
+	localImage     = localImageRepo + ":" + localImageTag
 )
 
 var deployAppLabels = client.MatchingLabels{"app": "muninn"}
@@ -51,11 +55,11 @@ var webhookAppLabels = client.MatchingLabels{"app": "muninn-webhook"}
 
 const injectPodName = "netrunner"
 
-// TestE2E deploys Muninn in-cluster via `make deploy` and exercises it
-// through the real gRPC wire protocol over a port-forward. Requires a real
-// cluster with the image already built and loaded under the localImage tag
-// (`make image load IMG=ghcr.io/garoze/muninn:local`) - not done here,
-// since `make load` needs interactive sudo.
+// TestE2E installs the in-tree chart against a real cluster and exercises
+// the result through the real gRPC wire protocol over a port-forward.
+// Requires a real cluster with the image already built and loaded under the
+// localImage tag (`make image load IMG=ghcr.io/garoze/muninn:local`) - not
+// done here, since `make load` needs interactive sudo.
 func TestE2E(t *testing.T) {
 	if os.Getenv("MUNINN_IT_E2E") != "1" {
 		t.Skip("set MUNINN_IT_E2E=1 to run e2e tests against a real cluster")
@@ -79,6 +83,9 @@ func TestE2E(t *testing.T) {
 
 	// Self-contained fixtures in a distinct namespace, so this doesn't
 	// collide with sample data a human may have already applied by hand.
+	// Namespace deletion is asynchronous, so back-to-back runs would
+	// otherwise fail here against the previous run's teardown.
+	waitForNamespaceGone(t, k8sClient, e2eNamespace, 60*time.Second)
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: e2eNamespace}}
 	if err := k8sClient.Create(context.Background(), ns); err != nil {
 		t.Fatalf("create namespace: %v", err)
@@ -105,9 +112,20 @@ func TestE2E(t *testing.T) {
 		_ = k8sClient.Delete(context.Background(), cm)
 	})
 
-	runMake(t, repoRoot, "deploy", "IMG="+localImage)
+	chartutil.EnsureDependencies(t)
+
+	// Uninstalling deletes the namespace the release owns, and Helm cannot
+	// write its release record into one that is still terminating - so a run
+	// started straight after a previous teardown fails at install without
+	// this.
+	waitForNamespaceGone(t, k8sClient, deployNamespace, 60*time.Second)
+
+	// Resolver only for now; the webhook subtest below turns it on with an
+	// upgrade, which is also the sequence a cluster without cert-manager
+	// already serving has to follow.
+	helmDeploy(t, repoRoot, nil, "install", "webhook.enabled=false")
 	t.Cleanup(func() {
-		runMake(t, repoRoot, "undeploy")
+		helmUninstall(t, repoRoot, nil)
 	})
 
 	podName := waitForPodReady(t, k8sClient, deployNamespace, 90*time.Second, deployAppLabels)
@@ -174,7 +192,7 @@ func TestE2E(t *testing.T) {
 
 	t.Run("mutating webhook injects a working config file with drift reload", func(t *testing.T) {
 		if !certManagerInstalled(k8sClient) {
-			t.Skip("cert-manager not installed - required by config/webhook/issuer.yaml, see README Prerequisites")
+			t.Skip("cert-manager not installed - required by the chart's default certificate mode, see README Prerequisites")
 		}
 
 		clientset, err := kubernetes.NewForConfig(cfg)
@@ -182,8 +200,10 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("new clientset: %v", err)
 		}
 
-		runMake(t, repoRoot, "deploy-webhook", "IMG="+localImage)
-		t.Cleanup(func() { runMake(t, repoRoot, "undeploy-webhook") })
+		helmDeploy(t, repoRoot, nil, "upgrade")
+		// Back off to resolver-only rather than leaning on the uninstall
+		// below, so removing the webhook independently stays covered.
+		t.Cleanup(func() { helmDeploy(t, repoRoot, nil, "upgrade", "webhook.enabled=false") })
 
 		// Bound the blast radius before anything can trigger the webhook -
 		// failurePolicy: Fail would otherwise block Pod admission cluster-wide.
@@ -271,6 +291,48 @@ func runMake(t *testing.T, repoRoot, target string, vars ...string) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("make %s failed: %v\n%s", target, err, out.String())
 	}
+}
+
+// helmDeploy runs `helm install` or `helm upgrade` for the chart against
+// deployNamespace, pinning the locally-loaded image. The chart comes from
+// the working tree, never the registry - proving what a consumer pulls from
+// there is the nightly workflow's job, deliberately not this suite's. sets
+// are additional --set overrides.
+func helmDeploy(t *testing.T, repoRoot string, env []string, action string, sets ...string) {
+	t.Helper()
+	args := []string{action, helmRelease, chartutil.Path(t), "--namespace", deployNamespace}
+	if action == "install" {
+		// The chart carries its own Namespace resource, but Helm writes the
+		// release record into the target namespace before applying anything,
+		// so the namespace has to exist first.
+		args = append(args, "--create-namespace")
+	}
+	args = append(args, "--set", "image.repository="+localImageRepo, "--set", "image.tag="+localImageTag)
+	for _, s := range sets {
+		args = append(args, "--set", s)
+	}
+	runCmd(t, repoRoot, env, "helm", args...)
+}
+
+// waitForNamespaceGone blocks until namespace no longer exists, failing the
+// test if it is still there at the deadline.
+func waitForNamespaceGone(t *testing.T, k8sClient client.Client, namespace string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var ns corev1.Namespace
+		if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: namespace}, &ns); err != nil {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("namespace %s still exists after %s, a previous release may not have finished terminating", namespace, timeout)
+}
+
+func helmUninstall(t *testing.T, repoRoot string, env []string) {
+	t.Helper()
+	runCmd(t, repoRoot, env, "helm", "uninstall", helmRelease,
+		"--namespace", deployNamespace, "--ignore-not-found")
 }
 
 // waitForPodReady polls for a Pod matching labels in namespace to reach
@@ -363,7 +425,9 @@ func execInPod(cfg *rest.Config, clientset *kubernetes.Clientset, namespace, pod
 }
 
 // checkNotImagePullError skips with a clearer hint when the Pod isn't Ready
-// because the image isn't loaded into the node's containerd store.
+// because the image isn't loaded into the node's containerd store. The
+// localImage tag has no published counterpart, so a pull failure means the
+// local load never happened rather than a registry problem.
 func checkNotImagePullError(t *testing.T, k8sClient client.Client, namespace string) {
 	t.Helper()
 	var pods corev1.PodList
@@ -375,7 +439,11 @@ func checkNotImagePullError(t *testing.T, k8sClient client.Client, namespace str
 	}
 	for _, p := range pods.Items {
 		for _, cs := range p.Status.ContainerStatuses {
-			if cs.State.Waiting != nil && cs.State.Waiting.Reason == "ErrImageNeverPull" {
+			if cs.State.Waiting == nil {
+				continue
+			}
+			switch cs.State.Waiting.Reason {
+			case "ErrImagePull", "ImagePullBackOff":
 				t.Skip("image not loaded into the node's containerd store — run `make image load` first")
 			}
 		}

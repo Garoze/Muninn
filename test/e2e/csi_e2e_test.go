@@ -19,6 +19,7 @@ import (
 	secretsstorev1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 
 	"github.com/garoze/muninn/internal/kube"
+	"github.com/garoze/muninn/test/chartutil"
 )
 
 const csiClusterName = "muninn-csi-e2e-test"
@@ -122,14 +123,18 @@ EOF
 	runCmd(t, "", env, "kubectl", "apply", "-f", "https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml")
 	waitAllPodsReady(t, k8sClient, "cert-manager", 120*time.Second)
 
-	runCmd(t, repoRoot, env, "make", "deploy", "IMG="+localImage)
-	t.Cleanup(func() { runCmd(t, repoRoot, env, "make", "undeploy") })
+	chartutil.EnsureDependencies(t)
+
+	// secrets.enabled carries through both phases so the upgrade only ever
+	// changes webhook.enabled. Its Vault defaults already match the dev-mode
+	// server installed into kube-system above.
+	helmDeploy(t, repoRoot, env, "install", "webhook.enabled=false", "secrets.enabled=true")
+	t.Cleanup(func() { helmUninstall(t, repoRoot, env) })
 	if podName := waitForPodReady(t, k8sClient, deployNamespace, 90*time.Second, deployAppLabels); podName == "" {
 		t.Fatal("muninn (serve) pod never reached Ready")
 	}
 
-	runCmd(t, repoRoot, env, "make", "deploy-webhook", "IMG="+localImage)
-	t.Cleanup(func() { runCmd(t, repoRoot, env, "make", "undeploy-webhook") })
+	helmDeploy(t, repoRoot, env, "upgrade", "secrets.enabled=true")
 	if podName := waitForPodReady(t, k8sClient, deployNamespace, 90*time.Second, webhookAppLabels); podName == "" {
 		t.Fatal("muninn-webhook pod never reached Ready")
 	}

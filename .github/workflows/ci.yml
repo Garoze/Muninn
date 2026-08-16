@@ -13,8 +13,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       # Pinned rather than @latest: an upstream release should not change what
@@ -26,8 +26,8 @@ jobs:
   hygiene:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - name: gofmt
@@ -40,12 +40,24 @@ jobs:
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
+      # A tag is a mutable reference, and one of these workflows holds the
+      # identity that signs releases. The trailing version comment is what
+      # keeps the pin readable and what Dependabot rewrites on a bump.
+      - name: actions are pinned to a commit SHA
+        run: |
+          unpinned=$(grep -rnE "^[[:space:]]*-?[[:space:]]*uses:" .github/workflows/ \
+            | grep -vE "uses: [^@]+@[0-9a-f]{40} # v" || true)
+          if [ -n "$unpinned" ]; then
+            echo "actions must be pinned to a 40-character commit SHA:"
+            echo "$unpinned"
+            exit 1
+          fi
 
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - run: go build ./...
@@ -53,8 +65,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - run: go test ./... -short
@@ -62,8 +74,8 @@ jobs:
   test-integration:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       # Pinned rather than @latest, same reasoning as golangci-lint above:
@@ -72,6 +84,13 @@ jobs:
         run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.24.1
       - name: fetch envtest binaries (etcd, kube-apiserver)
         run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use -p path)" >> "$GITHUB_ENV"
+      # The webhook RBAC tests render the chart to get the exact grants a
+      # real install applies, so helm is a prerequisite of this tier now.
+      # Without it those tests skip rather than fail, which would lose the
+      # coverage silently.
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.2.4
       # The same target a developer runs, so CI and local runs cover the same
       # tests rather than drifting to different subsets.
       - run: make test-integration
@@ -79,27 +98,27 @@ jobs:
   govulncheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # govulncheck-action sets up Go itself below - a separate setup-go
       # step here collides with its cache restore once the cache is warm.
-      - uses: golang/govulncheck-action@v1
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:
           go-version-file: go.mod
 
   chart:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: azure/setup-helm@v5.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.2.4
       # Installs ct, yamllint, and yamale onto the runner - the
       # chart-testing project's own action, not hand-rolled. It does not
       # install helm itself, hence the separate step above.
-      - uses: helm/chart-testing-action@v2.8.0
-      - uses: actions/setup-go@v5
+      - uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f # v2.8.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       # helm-unittest ships no provenance file for its releases, so

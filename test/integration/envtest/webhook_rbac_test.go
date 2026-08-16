@@ -1,19 +1,22 @@
 package envtest_test
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 	"testing"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -23,6 +26,7 @@ import (
 	"github.com/garoze/muninn/internal/config"
 	kubeModule "github.com/garoze/muninn/internal/kube"
 	webhookModule "github.com/garoze/muninn/internal/webhook"
+	"github.com/garoze/muninn/test/chartutil"
 )
 
 // secretsStoreCRDDir locates config/crd/bases inside the
@@ -53,31 +57,81 @@ func secretsStoreCRDDir(t *testing.T) string {
 // Server-Side Apply needs patch, not update; only a real API server
 // denies that.
 //
-// Manifests are read directly from config/webhook/ rather than
-// reconstructed in Go, so this test exercises what actually gets deployed,
-// not a copy that can drift from it.
+// RBAC is rendered from the chart rather than reconstructed in Go, so this
+// test exercises what actually gets deployed, not a copy that can drift
+// from it. The chart's unit tests already assert which documents each
+// spcMode renders; what they cannot assert is whether those grants
+// authorize anything, since nothing enforces RBAC during templating. Each
+// case below therefore selects its RBAC by setting the value a user would
+// set, and lets a real API server decide the outcome.
 
-func webhookManifestPath(t *testing.T, name string) string {
+// renderChartRBAC renders the chart with sets applied and returns every
+// ServiceAccount, ClusterRole and ClusterRoleBinding in the output. The
+// remaining kinds are dropped: the namespaces are created separately, and
+// nothing else here has any bearing on what the webhook's identity is
+// allowed to do.
+func renderChartRBAC(t *testing.T, sets ...string) []*unstructured.Unstructured {
 	t.Helper()
-	_, thisFile, _, ok := goruntime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+
+	chartutil.EnsureDependencies(t)
+
+	args := []string{"template", "muninn", chartutil.Path(t), "--namespace", "muninn-system"}
+	for _, s := range sets {
+		args = append(args, "--set", s)
 	}
-	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "config", "webhook", name)
+	out, err := exec.Command("helm", args...).Output()
+	if err != nil {
+		t.Fatalf("helm template: %v", err)
+	}
+
+	var objs []*unstructured.Unstructured
+	reader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(out)))
+	for {
+		doc, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("split rendered manifests: %v", err)
+		}
+		if len(bytes.TrimSpace(doc)) == 0 {
+			continue
+		}
+		obj := &unstructured.Unstructured{}
+		if err := yaml.Unmarshal(doc, obj); err != nil {
+			t.Fatalf("decode rendered manifest: %v", err)
+		}
+		switch obj.GetKind() {
+		case "ServiceAccount", "ClusterRole", "ClusterRoleBinding":
+			objs = append(objs, obj)
+		}
+	}
+	if len(objs) == 0 {
+		t.Fatalf("no RBAC rendered from the chart with %v", sets)
+	}
+	return objs
 }
 
-func applyManifest(t *testing.T, ctx context.Context, c client.Client, name string, obj client.Object) {
+func applyAll(t *testing.T, ctx context.Context, c client.Client, objs []*unstructured.Unstructured) {
 	t.Helper()
-	data, err := os.ReadFile(webhookManifestPath(t, name))
-	if err != nil {
-		t.Fatalf("read %s: %v", name, err)
+	for _, obj := range objs {
+		if err := c.Create(ctx, obj); err != nil {
+			t.Fatalf("create %s %s: %v", obj.GetKind(), obj.GetName(), err)
+		}
 	}
-	if err := yaml.Unmarshal(data, obj); err != nil {
-		t.Fatalf("decode %s: %v", name, err)
+}
+
+// hasClusterRole reports whether objs contains a ClusterRole named name -
+// used to assert the chart rendered (or withheld) the writer role, so a
+// case that means to run without it fails loudly if the chart ever starts
+// granting it unconditionally.
+func hasClusterRole(objs []*unstructured.Unstructured, name string) bool {
+	for _, obj := range objs {
+		if obj.GetKind() == "ClusterRole" && obj.GetName() == name {
+			return true
+		}
 	}
-	if err := c.Create(ctx, obj); err != nil {
-		t.Fatalf("create %s: %v", name, err)
-	}
+	return false
 }
 
 // mintScopedClient mints a real TokenRequest-backed token for
@@ -164,11 +218,11 @@ func TestWebhookRBAC_WriterRoleApplied_CreateModeSucceeds(t *testing.T) {
 	ctx := context.Background()
 	restCfg, adminClient := startRBACEnvtest(t)
 
-	applyManifest(t, ctx, adminClient, "service_account.yaml", &corev1.ServiceAccount{})
-	applyManifest(t, ctx, adminClient, "role.yaml", &rbacv1.ClusterRole{})
-	applyManifest(t, ctx, adminClient, "role_binding.yaml", &rbacv1.ClusterRoleBinding{})
-	applyManifest(t, ctx, adminClient, "role_spc_writer.yaml", &rbacv1.ClusterRole{})
-	applyManifest(t, ctx, adminClient, "role_spc_writer_binding.yaml", &rbacv1.ClusterRoleBinding{})
+	objs := renderChartRBAC(t, "secrets.enabled=true", "secrets.spcMode=Create")
+	if !hasClusterRole(objs, "muninn-webhook-spc-writer") {
+		t.Fatal("Create mode rendered no writer ClusterRole")
+	}
+	applyAll(t, ctx, adminClient, objs)
 
 	scheme, _ := kubeModule.NewScheme()
 	scopedClient := mintScopedClient(t, ctx, restCfg, scheme, "muninn-system", "muninn-webhook")
@@ -188,12 +242,14 @@ func TestWebhookRBAC_WriterRoleNotApplied_CreateModeDenied(t *testing.T) {
 	ctx := context.Background()
 	restCfg, adminClient := startRBACEnvtest(t)
 
-	// Deliberately omit role_spc_writer.yaml/role_spc_writer_binding.yaml -
-	// this is the exact configuration that denied admission against a real
-	// kind cluster before those manifests existed.
-	applyManifest(t, ctx, adminClient, "service_account.yaml", &corev1.ServiceAccount{})
-	applyManifest(t, ctx, adminClient, "role.yaml", &rbacv1.ClusterRole{})
-	applyManifest(t, ctx, adminClient, "role_binding.yaml", &rbacv1.ClusterRoleBinding{})
+	// Reference mode renders no writer role, which is the configuration that
+	// denied admission against a real kind cluster before that role existed.
+	// Running Create mode against it is what a misconfigured deployment does.
+	objs := renderChartRBAC(t, "secrets.enabled=true", "secrets.spcMode=Reference")
+	if hasClusterRole(objs, "muninn-webhook-spc-writer") {
+		t.Fatal("Reference mode rendered the writer ClusterRole, which defeats this case")
+	}
+	applyAll(t, ctx, adminClient, objs)
 
 	scheme, _ := kubeModule.NewScheme()
 	scopedClient := mintScopedClient(t, ctx, restCfg, scheme, "muninn-system", "muninn-webhook")
@@ -217,10 +273,8 @@ func TestWebhookRBAC_ReferenceMode_BaseRoleAloneSuffices(t *testing.T) {
 	ctx := context.Background()
 	restCfg, adminClient := startRBACEnvtest(t)
 
-	applyManifest(t, ctx, adminClient, "service_account.yaml", &corev1.ServiceAccount{})
-	applyManifest(t, ctx, adminClient, "role.yaml", &rbacv1.ClusterRole{})
-	applyManifest(t, ctx, adminClient, "role_binding.yaml", &rbacv1.ClusterRoleBinding{})
 	// No writer role - proves Reference mode never needs it.
+	applyAll(t, ctx, adminClient, renderChartRBAC(t, "secrets.enabled=true", "secrets.spcMode=Reference"))
 
 	cfg := &config.Config{SecretSPCMode: config.SecretSPCModeReference, VaultAddress: "http://vault.kube-system:8200", VaultRoleName: "muninn"}
 	refs := []webhookModule.SecretRef{{Key: "db_password_ref", ObjectName: "db_password", Provider: "vault", Path: "secret/data/arasaka/db-password"}}

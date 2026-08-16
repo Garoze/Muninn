@@ -12,21 +12,25 @@ permissions:
   contents: read
   packages: write
   id-token: write
+  attestations: write
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # A publish that has stopped making progress should fail while the tag
+    # is still fresh, not hold a runner for the default six hours.
+    timeout-minutes: 20
     steps:
       # inputs.tag is only set when this workflow is dispatched explicitly,
       # not on a direct tag push
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.tag || github.ref_name }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
       - name: install ko
         run: go install github.com/google/ko@v0.19.1
-      - uses: azure/setup-helm@v5.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v4.2.4
       # GHCR requires a lowercase path; github.repository is "Garoze/Muninn"
@@ -36,39 +40,46 @@ jobs:
           echo "IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
           echo "CHARTS=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/charts" >> "$GITHUB_ENV"
       - name: log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # :latest is reserved for an official release cut on main - an alpha
-      # tag from develop always carries -alpha., never gets it
+      # :latest is reserved for an official release cut on main. Matching an
+      # exact vMAJOR.MINOR.PATCH excludes every prerelease shape by
+      # construction; excluding one suffix instead only excludes the shapes
+      # that were thought of, and release-please emits more than one.
       - name: determine image tags
         id: tags
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
           TAGS="$TAG"
-          if [[ "$TAG" != *-alpha.* ]]; then
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             TAGS="$TAGS,latest"
           fi
           echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
       # Platforms come from .ko.yaml's defaultPlatforms, not repeated here.
-      # --image-refs writes one line (first tag + the digest all requested
-      # tags share) - that digest, not any tag, is what gets signed next.
+      # The digest to sign is the index's, taken from ko's stdout: one line
+      # carrying the tagged reference. --image-refs cannot give it, because
+      # for a multi-platform build it lists the index and every child
+      # manifest with nothing distinguishing them.
+      # --sbom=none because ko publishes its SBOM as a cosign attachment: an
+      # unsigned blob at a derived tag, deprecated in favour of attestations.
+      # The SBOM below is attested instead, so it carries an identity.
       - name: build and push
         id: build
         env:
           KO_DOCKER_REPO: ${{ env.IMAGE }}
           VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
-          ko build ./cmd/muninn --bare --sbom=none \
-            --tags="${{ steps.tags.outputs.tags }}" --image-refs=ko-image-refs.txt \
+          ref=$(ko build ./cmd/muninn --bare --sbom=none \
+            --tags="${{ steps.tags.outputs.tags }}" \
             --image-label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
             --image-label org.opencontainers.image.description="Kubernetes-native runtime configuration resolver" \
-            --image-label org.opencontainers.image.licenses=MIT
-          echo "digest=$(cut -d@ -f2 ko-image-refs.txt)" >> "$GITHUB_OUTPUT"
+            --image-label org.opencontainers.image.licenses=MIT)
+          echo "digest=${ref##*@}" >> "$GITHUB_OUTPUT"
       - name: install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
       # Signs the digest this build step actually produced, not the tag -
       # steps.build.outputs.digest is what makes that possible
       - name: sign the image digest
@@ -80,6 +91,60 @@ jobs:
           cosign verify ${{ env.IMAGE }}@${{ steps.build.outputs.digest }} \
           --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/publish.yml@${{ github.ref }}" \
           --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+      # Provenance answers a different question than the signature does: not
+      # who published this, but what source and builder produced it.
+      #
+      # push-to-registry stays off. With it on, GitHub pushes the attestation
+      # to the digest's .att tag asynchronously, minutes after the workflow
+      # ends, replacing the SBOM cosign put there - which no in-workflow check
+      # can catch, because the overwrite has not happened yet. GHCR's
+      # referrers API returned nothing for those pushes either, so the only
+      # effect was destroying the SBOM. Provenance stays in this repository's
+      # attestation store, which is what gh attestation verify reads.
+      - name: attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: false
+      - name: generate the image SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: image.spdx.json
+          # The attestation is the published artifact; a workflow artifact and
+          # a release asset would be two more unsigned copies of it.
+          upload-artifact: false
+          upload-release-assets: false
+      - name: attest the image SBOM
+        run: |
+          cosign attest --yes --type spdxjson --predicate image.spdx.json \
+            ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+      # The two attestations end up in different places and neither tool sees
+      # both. cosign owns the digest's .att tag, where its last writer wins;
+      # the provenance action also publishes an OCI referrer, and that
+      # survives cosign overwriting .att. Each is therefore checked with the
+      # tool that can read it, after both have been written - a check sitting
+      # between the two passes on an artifact the next step overwrites.
+      #
+      # cosign's verification summary goes to stderr and stays in the log;
+      # its payload goes to stdout and is redirected, because cosign verified
+      # in about a second and then never exited with a megabyte of payload
+      # going to the Actions log pipe. The timeouts keep a hang from holding
+      # the job open for hours instead of failing.
+      - name: verify the image attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          timeout 120 cosign verify-attestation --type spdxjson ${{ env.IMAGE }}@${{ steps.build.outputs.digest }} \
+          --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/publish.yml@${{ github.ref }}" \
+          --certificate-oidc-issuer "https://token.actions.githubusercontent.com" > sbom-attestation.json
+          jq -e '.payload' sbom-attestation.json > /dev/null
+          timeout 120 gh attestation verify "oci://${{ env.IMAGE }}@${{ steps.build.outputs.digest }}" \
+            --repo ${{ github.repository }} --format json > provenance-attestation.json
+          jq -e '.[0].verificationResult.statement.predicateType == "https://slsa.dev/provenance/v1"' \
+            provenance-attestation.json > /dev/null
       # These repos are only needed to vendor the opt-in subchart archives
       # into the package below - the chart's own version is independent of
       # this tag and comes from Chart.yaml, unrelated to the image tags above.
