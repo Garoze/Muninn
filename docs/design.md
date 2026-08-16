@@ -527,6 +527,26 @@ or trusted by this service), with the CA bundle the API server needs to
 validate it kept in sync automatically rather than hand-copied into the
 webhook registration.
 
+**Who may call the webhook is a deployment property, not something the
+webhook asserts.** Its serving certificate proves the webhook's identity
+to the API server; it does not authenticate the caller in the other
+direction, so any client that can route to the Service can present a
+well-formed admission request. The same reasoning applies here as to the
+gRPC API's caller authentication: a cluster establishes that boundary
+where it already establishes every other one - network policy, a service
+mesh, or a gateway that terminates and re-originates the connection - and
+a component that hardcoded mutual TLS would be asserting a topology it
+cannot see, the same mistake as assuming a mesh is or is not present.
+
+What bounds the consequence is what such a request can cause. The
+namespace acted on is the one the API server attributes to the request,
+never a field a caller chooses, and the content of any object written is
+derived entirely from that namespace's own configuration - so a request
+from an unexpected caller can cause work, but cannot introduce data of
+its own or reach across a namespace boundary. Requests are size-bounded
+for the same reason the component's availability matters at all: it sits
+in the Pod creation path, and unavailability there is felt cluster-wide.
+
 No secret value passes through either process in either direction. The
 values a source object carries are configuration data; where a secret is
 involved, what the object carries is a reference to it and never the

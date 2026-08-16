@@ -1,0 +1,99 @@
+suite: rbac
+templates:
+  - manager-rbac.yaml
+  - webhook-rbac.yaml
+tests:
+  # The invariant the secret-delivery design rests on is that no component of
+  # this chart can read a Secret (docs/adr/0012-csi-secret-delivery.md).
+  # Nothing else in the repository asserts it: a rule widened to include
+  # secrets would render, install, and pass every other check here. These
+  # assertions are exact rather than "does not contain secrets", because
+  # `secrets-store.csi.x-k8s.io` legitimately contains that word.
+  - it: grants the resolver read access to ConfigMaps and nothing else
+    template: manager-rbac.yaml
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: kind
+          value: ClusterRole
+      - lengthEqual:
+          path: rules
+          count: 1
+      - equal:
+          path: rules[0].apiGroups
+          value: [""]
+      - equal:
+          path: rules[0].resources
+          value: ["configmaps"]
+      # No write verb: the resolver only ever reads what it caches.
+      - equal:
+          path: rules[0].verbs
+          value: ["get", "list", "watch"]
+
+  # Cluster-scoped because the namespaces it must watch are not known ahead of
+  # time - docs/adr/0002-cluster-scoped-rbac-for-dynamic-namespaces.md.
+  - it: binds the resolver's role to its own ServiceAccount
+    template: manager-rbac.yaml
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: kind
+          value: ClusterRoleBinding
+      - equal:
+          path: roleRef.name
+          value: muninn-manager
+      - equal:
+          path: subjects[0].name
+          value: muninn
+
+  - it: grants the webhook only ConfigMap reads when secrets are disabled
+    template: webhook-rbac.yaml
+    documentIndex: 0
+    asserts:
+      - lengthEqual:
+          path: rules
+          count: 1
+      - equal:
+          path: rules[0].resources
+          value: ["configmaps"]
+      - equal:
+          path: rules[0].verbs
+          value: ["get", "list", "watch"]
+
+  # Reference mode exists precisely to avoid a write grant: the object is
+  # pre-provisioned and this role may only read it.
+  - it: adds a read-only SecretProviderClass grant in Reference mode
+    template: webhook-rbac.yaml
+    set:
+      secrets.enabled: true
+      secrets.spcMode: Reference
+    documentIndex: 0
+    asserts:
+      - lengthEqual:
+          path: rules
+          count: 2
+      - equal:
+          path: rules[1].apiGroups
+          value: ["secrets-store.csi.x-k8s.io"]
+      - equal:
+          path: rules[1].resources
+          value: ["secretproviderclasses"]
+      - equal:
+          path: rules[1].verbs
+          value: ["get"]
+
+  # The write grant is deliberately a separate role, so that enabling
+  # Reference mode cannot leave a create/patch permission behind.
+  - it: keeps no write verb in the webhook's own role in Create mode
+    template: webhook-rbac.yaml
+    set:
+      secrets.enabled: true
+      secrets.spcMode: Create
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: rules[0].verbs
+          value: ["get", "list", "watch"]
+      - equal:
+          path: rules[1].verbs
+          value: ["get"]

@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/transport/spdy"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	discoveryv1 "github.com/garoze/muninn/gen/discovery/v1"
@@ -221,6 +222,17 @@ func TestE2E(t *testing.T) {
 				Annotations: map[string]string{"muninn.io/inject": "true"},
 			},
 			Spec: corev1.PodSpec{
+				// Deliberately not root. The injected containers run as the
+				// image's own non-root user and write the config file, so a
+				// consumer running as root can read it whatever its mode is -
+				// which is how a file readable only by its owner went
+				// unnoticed. A different non-root user is the ordinary case
+				// and the one that actually exercises the permissions.
+				SecurityContext: &corev1.PodSecurityContext{
+					RunAsUser:    ptr.To[int64](12000),
+					RunAsGroup:   ptr.To[int64](12000),
+					RunAsNonRoot: ptr.To(true),
+				},
 				Containers: []corev1.Container{
 					{
 						Name:    "app",

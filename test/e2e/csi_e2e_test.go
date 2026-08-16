@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	secretsstorev1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 
@@ -192,6 +193,15 @@ EOF
 		},
 		Spec: corev1.PodSpec{
 			ServiceAccountName: "default",
+			// A non-root consumer, and not the same user the injected
+			// containers run as: this is what makes the assertions below
+			// about reading the config file and the mounted secret mean
+			// something. As root every mode is readable.
+			SecurityContext: &corev1.PodSecurityContext{
+				RunAsUser:    ptr.To[int64](12000),
+				RunAsGroup:   ptr.To[int64](12000),
+				RunAsNonRoot: ptr.To(true),
+			},
 			Containers: []corev1.Container{
 				{Name: "app", Image: "busybox:1.36", Command: []string{"sleep", "3600"}},
 			},
