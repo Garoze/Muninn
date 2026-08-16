@@ -1,0 +1,32 @@
+name: back-merge
+# Every change enters through develop, so main should only ever be ahead
+# briefly. It stops being brief when something lands on main that no release
+# cut produced - a fix applied there directly, or a dependency update raised
+# against the default branch. cut-release back-merges only at the end of a
+# cut, which covers none of those.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  back-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Full history: the merge base between the branches is what the
+      # changelog resolution reads.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: back-merge main into develop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          hack/back-merge.sh "main-${GITHUB_SHA::7}"
