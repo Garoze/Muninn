@@ -160,6 +160,8 @@ oci://ghcr.io/garoze/charts/muninn` documents every option.
 
 The chart and image are both signed with [cosign](https://github.com/sigstore/cosign)
 under this repository's own GitHub Actions identity.
+[`docs/verification.md`](docs/verification.md) covers how to check either one
+before installing it, and what that check does and does not establish.
 
 ## Delivering config as a file
 
