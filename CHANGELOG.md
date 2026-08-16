@@ -1,38 +1,14 @@
 # Changelog
 
-## [0.2.2-alpha.5](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.4...v0.2.2-alpha.5) (2026-08-16)
+## 0.2.2 (2026-08-16)
 
 
 ### Bug Fixes
 
 * **ci:** stop publishing provenance to the registry ([42fd111](https://github.com/Garoze/Muninn/commit/42fd1113325c8ab33855cfdfb5cff690bf59b919))
-
-## [0.2.2-alpha.4](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.3...v0.2.2-alpha.4) (2026-08-16)
-
-
-### Bug Fixes
-
 * **ci:** verify each attestation with the tool that can read it ([6a5a9a8](https://github.com/Garoze/Muninn/commit/6a5a9a8afdde2c5d233364ccf9579ec1bdbefa39))
-
-## [0.2.2-alpha.3](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.2...v0.2.2-alpha.3) (2026-08-16)
-
-
-### Bug Fixes
-
 * **ci:** stop the provenance step destroying the SBOM attestation ([1a7c8e9](https://github.com/Garoze/Muninn/commit/1a7c8e97542be5a09fcf62a1e8cfe4d3800b587f))
-
-## [0.2.2-alpha.2](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.1...v0.2.2-alpha.2) (2026-08-16)
-
-
-### Bug Fixes
-
 * **ci:** keep the attestation verify from hanging the publish job ([21bbede](https://github.com/Garoze/Muninn/commit/21bbedef0d65d9e59e62b4b64e550cac9acca2d7))
-
-## [0.2.2-alpha.1](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha...v0.2.2-alpha.1) (2026-08-16)
-
-
-### Bug Fixes
-
 * **ci:** take the digest to sign from ko's stdout ([30232eb](https://github.com/Garoze/Muninn/commit/30232eb94a12f8f8e3f6aa70c481619361c5a8f2))
 
 ## [0.2.2-alpha](https://github.com/Garoze/Muninn/compare/v0.2.1...v0.2.2-alpha) (2026-08-16)
