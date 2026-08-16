@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2-alpha.5](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.4...v0.2.2-alpha.5) (2026-08-16)
+
+
+### Bug Fixes
+
+* **ci:** stop publishing provenance to the registry ([42fd111](https://github.com/Garoze/Muninn/commit/42fd1113325c8ab33855cfdfb5cff690bf59b919))
+
 ## [0.2.2-alpha.4](https://github.com/Garoze/Muninn/compare/v0.2.2-alpha.3...v0.2.2-alpha.4) (2026-08-16)
 
 
