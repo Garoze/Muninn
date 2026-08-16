@@ -156,10 +156,17 @@ jobs:
         run: helm dependency build charts/muninn
       # helm push has no --image-refs equivalent, so the digest to sign is
       # parsed from its own stdout instead of a written file.
+      #
+      # appVersion is stamped from the release being published rather than
+      # read from Chart.yaml: it describes the application the chart
+      # deploys, so a value maintained by hand goes stale the first time a
+      # release ships without anyone remembering it. The chart's own version
+      # still comes from Chart.yaml, and is independent of this tag.
       - name: package and push chart
         id: chart
         run: |
-          helm package charts/muninn -d /tmp
+          app_version="${{ inputs.tag || github.ref_name }}"
+          helm package charts/muninn -d /tmp --app-version "${app_version#v}"
           version=$(helm show chart charts/muninn | awk -F': ' '/^version:/{print $2}')
           output=$(helm push "/tmp/muninn-${version}.tgz" oci://${{ env.CHARTS }} 2>&1 | tee /dev/stderr)
           digest=$(echo "$output" | grep -oP 'Digest: \Ksha256:[0-9a-f]+')
