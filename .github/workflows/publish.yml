@@ -16,6 +16,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # A publish that has stopped making progress should fail while the tag
+    # is still fresh, not hold a runner for the default six hours.
+    timeout-minutes: 20
     steps:
       # inputs.tag is only set when this workflow is dispatched explicitly,
       # not on a direct tag push
@@ -102,11 +105,17 @@ jobs:
         run: |
           cosign attest --yes --type spdxjson --predicate image.spdx.json \
             ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+      # The verification summary goes to stderr and stays in the log; the
+      # attestation payload goes to stdout and is redirected to a file,
+      # because cosign verified in about a second and then never exited
+      # with that payload going to the Actions log pipe. The timeout keeps
+      # a hang from holding the job open for hours instead of failing.
       - name: verify the SBOM attestation
         run: |
-          cosign verify-attestation --type spdxjson ${{ env.IMAGE }}@${{ steps.build.outputs.digest }} \
+          timeout 120 cosign verify-attestation --type spdxjson ${{ env.IMAGE }}@${{ steps.build.outputs.digest }} \
           --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/publish.yml@${{ github.ref }}" \
-          --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          --certificate-oidc-issuer "https://token.actions.githubusercontent.com" > attestation.json
+          jq -e '.payload' attestation.json > /dev/null
       # Provenance answers a different question than the signature does: not
       # who published this, but what source and builder produced it. Pushed to
       # the registry so it travels with the image rather than living only in
