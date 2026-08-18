@@ -4,75 +4,62 @@
 
 ## Context
 
-Two pieces of third-party infrastructure are needed for the full feature
-set. The admission webhook cannot serve without a certificate the API
-server trusts, and delivering the values behind secret references
-([ADR-0012](0012-csi-secret-delivery.md)) needs a secret-store driver and
-a provider on every node.
+Two pieces of third-party infrastructure are required for the full
+feature set. The admission webhook cannot serve without a certificate the
+API server trusts, which cert-manager supplies. Delivering the values
+behind secret references ([ADR-0012](0012-csi-secret-delivery.md))
+requires secrets-store-csi-driver and a provider on every node.
 
-Both are cluster singletons. A certificate manager and a node-level
-storage driver are installed once per cluster, usually before this
-project exists there, and frequently by someone else. An installation
-that assumes their absence and installs them will collide with the copy
-already running; one that assumes their presence fails on a cluster that
-has neither, with an error pointing at a missing resource type rather
-than at the prerequisite that is actually missing.
+Both are cluster singletons. They are installed once per cluster, usually
+before Muninn exists there and often by another team. An install that
+assumes they are absent collides with the instance already running. An
+install that assumes they are present fails on a cluster that has
+neither, and the resulting error names a missing resource type rather
+than the missing prerequisite.
 
 ## Decision
 
-Both ship as declared dependencies of the chart, conditional on a value,
-and both default to off. The common case - a cluster where these already
-exist, managed independently - installs nothing extra and inherits
-nothing. A cluster that has neither can turn them on and get a working
-installation from one source.
+Both ship as chart dependencies, conditional on a value and defaulting to
+off. A cluster that already has them installs nothing extra. A cluster
+that has neither can enable them and complete the install in one command.
 
-Off is the default because the failure modes are asymmetric. Installing
-alongside an existing singleton damages a shared component other
-workloads depend on; declining to install one produces a clear failure in
-this project alone.
+Off is the default because the two failure modes differ in blast radius.
+Installing over an existing singleton affects a component other workloads
+depend on. Declining to install one affects only Muninn.
 
 ## Alternatives considered
 
-**Default on.** Optimizes for the empty cluster, which is the rarer case
-and the one whose operator is most able to notice what is missing. It
-makes the destructive mistake the default, which inverts the asymmetry
-above.
-
-**Require them as external prerequisites, documented only.** The honest
-minimum, and where this started. It leaves the fresh-cluster path as a
-list of manual steps whose ordering matters and which nothing verifies,
-and it makes the project's own end-to-end coverage depend on a cluster
-someone prepared by hand.
-
-**Install them through a separate mechanism owned by this project.**
-Removes the conditional dependency and replaces it with bespoke ordering
-logic reimplementing what the packaging tool already does, while still
-owning the collision problem.
+- **Default on.** Rejected: optimizes for the empty cluster, which is the
+  rarer case, and makes the higher-blast-radius outcome the default.
+- **Require them as external prerequisites, documented only.** Rejected:
+  it is the smallest possible commitment and the original arrangement,
+  but it leaves a fresh cluster with manual, order-dependent steps that
+  nothing verifies, and it makes Muninn's end-to-end coverage depend on a
+  cluster prepared by hand.
+- **Install them from Muninn's own code, outside the chart.** Rejected:
+  replaces a conditional dependency with ordering logic that reimplements
+  what Helm already provides, and retains the collision problem.
 
 ## Consequences
 
-A fresh install that enables them needs two passes. The certificate
-manager's own admission webhook has to be serving before a certificate
-request is admitted, and a single pass submits both at once - so the
-first pass installs the dependency with this project's webhook disabled,
-and the second enables it. This is inherent to admission-time validation,
-not to how the dependency is packaged.
+Enabling cert-manager on a fresh cluster takes two passes. Its webhook
+has to be serving before a `Certificate` is admitted, and a single pass
+submits both at once. The first pass installs the dependency with
+Muninn's webhook disabled; the second enables it.
 
-Dependencies inherit the release namespace, with no per-dependency
-override. Installing them means installing them where this project lives,
-which is not where an operator would have put them by choice.
+Dependencies are installed into the release namespace, with no
+per-dependency override. Enabling them places a cluster-wide component
+where Muninn lives rather than where an operator would otherwise have
+placed it.
 
-Custom resource definitions supplied by a dependency are installed once
-and never upgraded by the packaging tool. Moving a dependency to a
-version whose definitions changed requires applying those definitions
-outside the normal upgrade, and nothing warns when that has been missed.
+Helm installs a dependency's CRDs once and does not upgrade them. Moving
+to a dependency version whose CRDs changed means applying them outside
+the normal upgrade, and nothing reports when that step is missed.
 
-Removing this project removes what it installed. On a cluster where the
-dependencies were enabled here, uninstalling takes a cluster-wide
-certificate manager with it, breaking every unrelated workload that
-depended on it.
+Uninstalling Muninn removes what it installed. On a cluster where these
+dependencies were enabled here, the uninstall also removes cert-manager
+and breaks unrelated workloads.
 
-The dependency archives are vendored into the published package, so
-installing pulls images this project does not build and cannot attest.
-Which images those are is answerable only by rendering the chart, since
-no attestation covers the chart's contents.
+The dependency archives are packaged into the published chart, so
+installing pulls images Muninn does not build and cannot attest.
+Rendering the chart is the only way to enumerate them.
