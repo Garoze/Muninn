@@ -12,7 +12,7 @@ listed here, lives in [`../design.md`](../design.md).
 | [0003](0003-no-caller-auth-on-query-api.md) | No caller authentication or authorization on the Query API |
 | [0004](0004-grpc-over-rest.md) | gRPC over REST as the transport protocol |
 | [0005](0005-concrete-domain-service-no-interface.md) | Concrete domain service dependency instead of a handler-defined interface |
-| [0006](0006-no-client-library.md) | Decision not to build a client library |
+| [0006](0006-no-client-library.md) | No client library shipped in this repository |
 | [0007](0007-namespace-as-resolution-scope.md) | Namespace as an open-ended resolution scope, not an enforced tenant model |
 | [0008](0008-pluggable-config-source.md) | Pluggable ConfigSource interface instead of a fixed set of custom resources |
 | [0009](0009-no-fixed-key-whitelist.md) | No fixed key whitelist, resolving directly against source data |
@@ -22,4 +22,4 @@ listed here, lives in [`../design.md`](../design.md).
 | [0013](0013-workflow-identity-publishing.md) | Artifacts published and signed under a workflow identity, not a stored credential |
 | [0014](0014-chart-as-single-install-path.md) | A packaged chart as the single install path |
 | [0015](0015-opt-in-subcharts.md) | Cluster-singleton prerequisites ship as opt-in dependencies, default off |
-| [0016](0016-two-branch-release-model.md) | A staging branch with published prereleases, and an official release branch |
+| [0016](0016-two-branch-release-model.md) | Prereleases from `develop`, official releases from `main` |

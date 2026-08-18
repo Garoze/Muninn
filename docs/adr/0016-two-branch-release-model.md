@@ -1,101 +1,90 @@
-# ADR-0016: A staging branch with published prereleases, and an official release branch
+# ADR-0016: Prereleases from `develop`, official releases from `main`
 
 **Status:** Accepted
 
 ## Context
 
-The release path is the part of a project least exercised and most
-expensive to get wrong: it runs rarely, it runs on infrastructure the
-tests do not cover, and its defects are discovered at exactly the moment
-they are least welcome. Deciding where releases come from is therefore
-also deciding how often the machinery that produces them runs.
+The release path builds, publishes, signs, and attests. It runs against
+registry and signing infrastructure that no test tier covers, so the only
+thing that exercises it is running it. Official releases alone would run
+it a few times a year and leave its defects to surface during a release.
 
-A second, quieter requirement pulls in the same direction. Anyone
-arriving at this repository sees one branch by default, and the artifact
-a floating tag resolves to is what an unpinned install gets. Neither
-should ever show work in progress, whatever is being built at the time.
+Two externally visible surfaces constrain the answer: the branch a
+visitor sees by default, and the image an unpinned install receives
+through the `latest` tag. Both should reflect released work rather than
+work in progress.
 
 ## Decision
 
-Two long-lived branches, each with one job.
+Two long-lived branches, each with a single responsibility.
 
-Every change enters through the staging branch. Merging there updates a
-release pull request holding the next prerelease version and its
-changelog entry; merging *that* tags a prerelease, which publishes an
-image and a chart, signs both, and attests the image - the entire release
-path, on every batch of merged work.
+Every change enters through `develop`. Merging there updates a
+release-please pull request holding the next prerelease version and its
+changelog entry. Merging that pull request tags a prerelease, which
+builds and publishes an image and a chart, signs both, and attests the
+image, so the whole release path runs on every batch of merged work.
 
-The release branch holds only official releases. Cutting one is a
-deliberate act: it consolidates the accumulated prerelease changelog
-entries into a single entry, tags, publishes, and returns the release
-branch's own commits to the staging branch. The floating tag is reserved
-for these, matched by an exact three-part version rather than by
-excluding the prerelease shapes anyone thought to enumerate.
+`main` holds official releases only. Cutting one is a manual dispatch
+with an explicit `vX.Y.Z`. It consolidates the accumulated prerelease
+changelog entries into one entry, tags, publishes, and merges `main` back
+into `develop`. The `latest` tag is reserved for official releases,
+matched by an exact three-part version rather than by excluding the
+prerelease version shapes known at the time the rule was written.
 
-The direction that is easy to forget is automated. A staging-to-release
-merge advances only the release branch; the staging branch's history
-never moves, so anything committed on the release side is invisible to
-the branch every change enters through. A merge in the other direction
-runs on any push to the release branch, not only at the end of a release,
-because commits arrive there by more routes than a release cut.
+The merge back is automated because it is the direction most often
+omitted. A `develop`-to-`main` merge advances only `main`, so anything
+committed on `main` sits outside the history of the branch every change
+enters through. It runs on any push to `main`, not only at the end of a
+cut, because commits reach `main` by other routes as well.
 
 ## Alternatives considered
 
-**A single branch, releases by tag.** What most comparable projects run,
-and it removes every failure listed below by construction: there is no
-second branch to fall behind, no direction to merge back, no second copy
-of a changelog to reconcile, and no default-branch ambiguity for tools
-that pick one. Continuous exercise of the release path is achievable
-without a staging branch, by publishing prereleases from the trunk. The
-property this decision is actually buying is narrower than it first
-appears: that the default branch and the floating tag never show
-in-progress work.
-
-**Two branches, merged back by hand.** The original shape, and the one
-that fails silently. Nothing signals that the branches have diverged
-until something that reads the staging branch's history cannot find a
-version that exists on the other one.
+- **A single branch, releases by tag.** Rejected for this scope: it is
+  what most comparable CNCF projects run, and it removes every failure
+  mode listed below by construction. Prereleases can also be published
+  continuously from a trunk, so what this decision provides over that
+  option is limited to one property: the default branch and the `latest`
+  tag never present work in progress.
+- **Two branches, merged back by hand.** Rejected: the original
+  arrangement, in which divergence is not reported. Nothing indicates
+  that the branches have diverged until something reading `develop`
+  cannot find a version that exists on `main`.
 
 ## Consequences
 
-The release path runs continuously, which is the point. Every prerelease
-is a signed, attested artifact produced by the same pipeline as an
-official release, and that repetition is what surfaces its defects before
-a release depends on them.
+The release path runs continuously. Every prerelease is a signed,
+attested artifact built by the same pipeline as an official release, and
+that repetition is what surfaces the pipeline's defects before a release
+depends on them.
 
-The machinery that keeps two branches consistent exists only because
-there are two branches, and it is not small. Its cost is recorded here
-rather than in a commit message, because it is the honest measure of this
-decision:
+Keeping two branches consistent requires machinery that a single branch
+would not:
 
-- Commits made on the release branch are unreachable from staging without
-  an explicit merge back, which had to be automated after being missed.
-- The automation that does the merging had its own defect: a
-  staging-to-release merge leaves the release branch strictly ahead, so
-  the merge back fast-forwards and produces nothing to commit.
-- The changelog diverges by design - staging accumulates one entry per
-  prerelease, the release branch consolidates them - so the conflict is
-  guaranteed on every merge back and needs its own resolution rule.
-- The release automation's version manifest is authoritative on staging
-  and inherited stale on the release branch, which had to be corrected
-  and then written deliberately at each cut.
-- Tooling that defaults to the repository's default branch picks the
-  wrong one. A dependency updater raised its first pull request against
-  the release branch, where a merge would have reached a release without
-  the pipeline it changes having been exercised.
+- Commits on `main` are unreachable from `develop` without an explicit
+  merge back, which had to be automated after being omitted.
+- That merge requires `--no-ff`. A `develop`-to-`main` merge leaves `main`
+  strictly ahead, so the merge back fast-forwards and commits nothing.
+- The changelog diverges by design, since `develop` keeps one entry per
+  prerelease and `main` consolidates them. The conflict occurs on every
+  merge back and requires its own resolution rule.
+- release-please's version manifest is authoritative on `develop` and
+  inherited stale on `main`. It is written deliberately at each cut and
+  reset on `develop` afterwards; otherwise the next prerelease computes a
+  version below the one just released.
+- Tools that default to the repository's default branch select the wrong
+  one. Dependabot raised its first pull request against `main`, where
+  merging would have reached a release without any prerelease having
+  exercised the workflows it changes, and would have left the bump
+  invisible to `develop` until the next merge back. It is now pointed at
+  `develop` explicitly.
 
-Every one of those is a consequence of the topology rather than a bug in
-any single component. A single-branch model would not have produced any
-of them.
-
-Two prerelease version shapes exist, and both must be handled everywhere
+Two prerelease version shapes exist and both have to be handled wherever
 a version is inspected: the first prerelease after a release carries no
-increment, and later ones do. Assuming the incremented shape has been
-wrong twice - once where the floating tag was withheld, once where the
-changelog was consolidated - which is why both now test for an official
-release positively rather than excluding prereleases by name.
+increment, later ones do. Handling only the incremented shape produced
+two defects, one where the `latest` tag was withheld and one where the
+changelog was consolidated incorrectly. Both now test for an official
+release positively rather than excluding prerelease shapes by name.
 
-Anything that changes release tooling has to be considered on both
-branches, including which branch it must reach to take effect. A workflow
-runs only from the branch it exists on, so a fix to the release branch's
-behaviour does nothing until it is merged there.
+A workflow runs only from the branch it is on, so any change to release
+tooling has to be considered on both branches, including which branch it
+must reach to take effect.
