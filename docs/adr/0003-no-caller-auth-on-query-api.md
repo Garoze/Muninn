@@ -4,11 +4,11 @@
 
 ## Context
 
-The data this service serves is configuration a consumer's own workload
-reads to change its own runtime behavior: not credentials, and not data
-that itself grants access to anything else. Whatever downstream
-authorization a consumer performs with that data is the consumer's own
-concern, not something this service mediates.
+The data Muninn serves is configuration a consumer's own workload reads
+to change its own runtime behavior. It is not credential material, and it
+does not itself grant access to anything else. Whatever downstream
+authorization a consumer performs with that data is the consumer's
+concern rather than something Muninn mediates.
 
 ## Decision
 
@@ -18,10 +18,9 @@ callers.
 ## Alternatives considered
 
 - **A gRPC authentication interceptor validating caller identity.** Not
-  implemented: judged an orthogonal concern from configuration
-  resolution, and one a real deployment would more naturally solve at a
-  network-policy or service-mesh layer than reimplement inside this
-  service.
+  implemented: judged an orthogonal concern to configuration resolution,
+  and one a real deployment would more naturally solve at a
+  network-policy or service-mesh layer than reimplement inside Muninn.
 
 ## Consequences
 
@@ -31,9 +30,10 @@ injected init container and sidecar, which default to plaintext for the
 same reason and connect over TLS only when a deployment opts the server
 into it, matching the server's own posture.
 
-This is a stated limitation rather than an oversight. A production
+This is a documented limitation rather than an oversight. A production
 deployment of this pattern would need cluster-internal network policy, or
-mutual TLS between this service and its callers, to make the boundary
-real. The decision holds only for as long as nothing flowing through the
-API grants access to anything else, which is why secret material is kept
-out of it entirely (see [ADR-0012](0012-csi-secret-delivery.md)).
+mutual TLS between Muninn and its callers, to make the boundary
+enforceable. The decision holds only for as long as nothing flowing
+through the API grants access to anything else, which is why secret
+material is kept out of it entirely (see
+[ADR-0012](0012-csi-secret-delivery.md)).

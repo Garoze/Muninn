@@ -4,71 +4,57 @@
 
 ## Context
 
-Installation was described twice. A directory of raw manifests carried
-the deployment, its service account and role bindings, the webhook's own
-deployment and admission registration, and its certificate; a packaged
-chart, added later, rendered the same objects from values. Both were
-current, both were referenced by the build targets, and neither was
-authoritative.
+Installing Muninn does not produce one fixed set of objects. Whether the
+admission webhook is deployed, how its serving certificate is obtained
+(cert-manager, self-signed, or supplied by the operator), and whether the
+grants secret delivery requires
+([ADR-0012](0012-csi-secret-delivery.md)) are present are separate
+choices. A static manifest set expresses those choices as a separate
+manifest variant per combination, each differing from the others in a
+small number of fields.
 
-Two descriptions of one installation drift, and they had. Sixteen
-manifests encoded ordering and cross-references that the chart also
-encoded, and each fix had to be made twice or made once and forgotten.
-That is not a hypothetical: the raw manifests and the chart had already
-disagreed about which grants the webhook needed, and the tests exercised
-whichever copy they happened to reference rather than the one an operator
-would apply.
+A static manifest set also cannot express a prerequisite a cluster may
+already run. A cluster missing cert-manager or secrets-store-csi-driver
+([ADR-0015](0015-opt-in-subcharts.md)) has to install those separately,
+in a specific order, before installing Muninn.
 
 ## Decision
 
-The chart is the only way to install. The raw manifest set is deleted,
-every build target and every test tier that installed something installs
-the chart, and the tests that assert over rendered authorization read
-that rendering from the chart rather than from a checked-in copy.
+The Helm chart is the only supported way to install Muninn. The static
+manifest set is deleted, the build targets install and uninstall the
+chart, and the tests that assert over rendered authorization render it
+from the chart rather than reading a checked-in copy.
 
-Demonstration fixtures for a *consumer's* namespace stay as plain
-manifests. They are not part of installing this project - they are
-example input a user applies to their own namespace - and a chart that
-installed them would be installing someone else's objects.
+Demonstration fixtures for a consumer's namespace remain as plain
+manifests. They are example input a consumer applies to their own
+namespace, not part of installing Muninn.
 
 ## Alternatives considered
 
-**Keep both, and treat the manifests as the readable reference.** The
-appeal is that a manifest can be read directly while a template cannot.
-The cost is the drift that motivated this record, and the readability is
-recoverable anyway: rendering the chart locally produces exactly the
-manifests an install applies, from the single source that is actually
-deployed.
-
-**Keep the manifests and drop the chart.** Viable while the installation
-had no options. It stops being viable once the certificate strategy, the
-webhook's presence, and the secret-delivery grants are all choices, since
-each one becomes a set of near-identical files a reader has to diff to
-understand.
-
-**Keep both, with one generated from the other.** Removes the drift and
-adds a generation step, a check that the generated copy is current, and a
-second artifact to review in every change. The generated copy would exist
-only to be read, which rendering already provides on demand.
+- **Keep both, treating the manifest set as the readable reference.**
+  Rejected: `helm template` renders exactly what an install applies, from
+  the source the install uses, so the same readability is available
+  without a second set of files to keep current.
+- **Keep the manifest set and drop the chart.** Rejected: workable while
+  the installation has no options. Each option above would be expressed as
+  another manifest variant rather than as a value.
+- **Keep both, generating the manifest set from the chart.** Rejected:
+  removes the drift, but adds a generation step, a check that the
+  generated output is current, and a second artifact to review in every
+  change. The generated copy would not be used for installation and would
+  therefore introduce an additional artifact to maintain.
 
 ## Consequences
 
-Installing requires a chart tool. That is an added dependency for an
-operator who previously needed only the cluster CLI, and it is also the
-tool that makes the options above expressible at all.
+Installing now requires Helm, which was not previously required.
 
-Test tiers that render authorization now depend on that tool too. Where
-it is absent those tests skip rather than fail, which silently loses
-coverage, so it is installed explicitly in the environment that runs
-them.
+The tests that assert over rendered authorization require Helm as well.
+They skip rather than fail when it is missing, which loses coverage
+without reporting the loss, so CI installs it explicitly rather than
+relying on the runner image.
 
-The published chart and the published image are separate artifacts with
-separate versions. Nothing in the chart binds it to a particular image
-digest, so a verified chart does not tell a consumer which image will
-run - a gap recorded in the verification documentation rather than hidden
-by it.
-
-Deleting the manifests removed comments that explained real constraints.
-Those explaining something still true were carried into the chart
-verbatim; two describing the old duplication itself were dropped, since
-the duplication they warned about no longer exists.
+The chart and the image are separate artifacts with independent versions,
+and the chart's default image reference is a mutable tag rather than an
+immutable digest. A verified chart therefore does not determine which
+image will run. The chart accepts a digest for the image reference, and
+the verification documentation covers pinning the chart and the image.
