@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2-alpha](https://github.com/Garoze/Muninn/compare/v0.3.1...v0.3.2-alpha) (2026-10-08)
+
+
+### Bug Fixes
+
+* **ci:** check out full history for the publish gate ([4ae8b32](https://github.com/Garoze/Muninn/commit/4ae8b32cfedc674dc6ba2de03ee1c1f927b4e254))
+
 ## 0.3.1 (2026-10-08)
 
 
