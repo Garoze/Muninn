@@ -16,6 +16,7 @@ permissions:
 jobs:
   install:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -37,13 +38,18 @@ jobs:
         with:
           go-version: "1.26"
       - name: install crane
-        run: go install github.com/google/go-containerregistry/cmd/crane@v0.20.7
+        run: |
+          for attempt in 1 2 3; do
+            go install github.com/google/go-containerregistry/cmd/crane@v0.20.7 && exit 0
+            sleep $((attempt * 10))
+          done
+          exit 1
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       # Installing from the published artifacts, not this checkout, is the
       # entire point of this workflow - no checkout step exists here.
       - name: verify published image signature
         run: |
-          cosign verify ghcr.io/garoze/muninn:latest \
+          timeout 120 cosign verify ghcr.io/garoze/muninn:latest \
             --certificate-identity-regexp "^https://github.com/${{ github.repository }}/.github/workflows/publish.yml@refs/tags/v.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
       # The publish job cannot prove an attestation survived: GitHub's own
@@ -75,12 +81,13 @@ jobs:
           version=$(crane ls ghcr.io/garoze/charts/muninn | grep -v '\.sig$' | sort -V | tail -1)
           echo "CHART_VERSION=$version" >> "$GITHUB_ENV"
           digest=$(crane digest ghcr.io/garoze/charts/muninn:"$version")
-          cosign verify ghcr.io/garoze/charts/muninn@"$digest" \
+          timeout 120 cosign verify ghcr.io/garoze/charts/muninn@"$digest" \
             --certificate-identity-regexp "^https://github.com/${{ github.repository }}/.github/workflows/publish.yml@refs/tags/v.*" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
       - name: install k3d
         run: curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | TAG=v5.9.0 bash
       - name: create cluster
+        id: cluster
         run: k3d cluster create nightly-${{ matrix.name }} --image rancher/k3s:v1.36.3-k3s1 --wait --timeout 120s
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
@@ -130,12 +137,14 @@ jobs:
           kubectl delete pod -n ${{ matrix.namespace }} -l app=muninn-webhook
           kubectl wait --for=condition=Ready pod -n ${{ matrix.namespace }} -l app=muninn-webhook --timeout=120s
       - name: delete cluster
-        if: always()
+        if: always() && steps.cluster.conclusion == 'success'
         run: k3d cluster delete nightly-${{ matrix.name }}
 
   notify-on-failure:
     needs: install
-    if: failure()
+    # Not failure(): a cancelled or timed-out job reports neither success nor
+    # failure, and that silence is the case this job exists to break.
+    if: always() && needs.install.result != 'success'
     runs-on: ubuntu-latest
     permissions:
       issues: write
