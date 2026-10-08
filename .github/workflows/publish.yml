@@ -24,6 +24,7 @@ jobs:
       # not on a direct tag push
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           ref: ${{ inputs.tag || github.ref_name }}
       # A tag can be placed on any commit, including one whose checks failed
       # or never ran, and everything below would sign and attest it just the
