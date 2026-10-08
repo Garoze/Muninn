@@ -87,7 +87,7 @@ jobs:
       # Pinned rather than @latest, same reasoning as golangci-lint above:
       # matches the controller-runtime version pinned in go.mod.
       - name: install setup-envtest
-        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.24.1
+        run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
       - name: fetch envtest binaries (etcd, kube-apiserver)
         run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use -p path)" >> "$GITHUB_ENV"
       # The webhook RBAC tests render the chart to get the exact grants a
