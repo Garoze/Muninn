@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1-alpha](https://github.com/Garoze/Muninn/compare/v0.3.0...v0.3.1-alpha) (2026-10-08)
+
+
+### Bug Fixes
+
+* **deps:** update otel to v1.45.0 and grpc to v1.83.1 ([001f392](https://github.com/Garoze/Muninn/commit/001f392464381ba32fa8294b83971cc97e9a21f7))
+
 ## 0.3.0 (2026-08-16)
 
 

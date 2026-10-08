@@ -20,3 +20,23 @@ updates:
       actions:
         patterns:
           - "*"
+
+  - package-ecosystem: gomod
+    directory: /
+    target-branch: develop
+    schedule:
+      interval: weekly
+    # This prefix is what keeps a routine bump out of the changelog and
+    # proposes no release.
+    commit-message:
+      prefix: "chore(deps)"
+    # Grouped where the modules are released as a set: a pull request moving
+    # one member alone does not build.
+    groups:
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/controller-runtime"
+      opentelemetry:
+        patterns:
+          - "go.opentelemetry.io/*"
