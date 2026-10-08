@@ -5,7 +5,7 @@ go 1.26.6
 require (
 	github.com/go-logr/zapr v1.3.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/spf13/pflag v1.0.9
+	github.com/spf13/pflag v1.0.10
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.65.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0
 	go.opentelemetry.io/otel v1.45.0
