@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2-alpha](https://github.com/Garoze/Muninn/compare/v0.3.1...v0.3.2-alpha) (2026-10-09)
+
+
+### Bug Fixes
+
+* **deps:** bump golang.org/x/net to v0.60.0 ([6cdc972](https://github.com/Garoze/Muninn/commit/6cdc972ceeabe581c1885005921e4c7e4a741b02))
+
 ## 0.3.1 (2026-10-08)
 
 
