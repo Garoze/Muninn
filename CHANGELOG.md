@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.2-alpha](https://github.com/Garoze/Muninn/compare/v0.3.1...v0.3.2-alpha) (2026-10-09)
+## 0.3.2 (2026-10-09)
 
 
 ### Bug Fixes
