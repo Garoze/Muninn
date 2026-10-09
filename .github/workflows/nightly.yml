@@ -76,9 +76,13 @@ jobs:
       # No floating "latest" tag exists for the chart - the highest semver
       # tag actually published is the equivalent, resolved directly against
       # the registry rather than assumed from Chart.yaml in this checkout.
+      #
+      # Matched by the shape a version has, not by excluding signature tags:
+      # cosign has changed what those are named.
       - name: resolve and verify published chart signature
         run: |
-          version=$(crane ls ghcr.io/garoze/charts/muninn | grep -v '\.sig$' | sort -V | tail -1)
+          version=$(crane ls ghcr.io/garoze/charts/muninn | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          [ -n "$version" ] || { echo "no published chart version found" >&2; exit 1; }
           echo "CHART_VERSION=$version" >> "$GITHUB_ENV"
           digest=$(crane digest ghcr.io/garoze/charts/muninn:"$version")
           timeout 120 cosign verify ghcr.io/garoze/charts/muninn@"$digest" \
