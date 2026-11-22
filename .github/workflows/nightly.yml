@@ -34,7 +34,7 @@ jobs:
             cert_manager_preinstalled: false
             subcharts_enabled: true
     steps:
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.26"
       - name: install crane
@@ -44,7 +44,7 @@ jobs:
             sleep $((attempt * 10))
           done
           exit 1
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       # Installing from the published artifacts, not this checkout, is the
       # entire point of this workflow - no checkout step exists here.
       - name: verify published image signature
@@ -93,7 +93,7 @@ jobs:
       - name: create cluster
         id: cluster
         run: k3d cluster create nightly-${{ matrix.name }} --image rancher/k3s:v1.36.3-k3s1 --wait --timeout 120s
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: v4.2.4
       - name: install cert-manager
